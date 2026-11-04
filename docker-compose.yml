@@ -1,0 +1,21 @@
+services:
+  md-converter:
+    build: .
+    container_name: md-converter
+    restart: unless-stopped
+    ports:
+      - "8093:8000"
+    environment:
+      - OLLAMA_URL=http://ia-ollama-1:11434
+      - PROMPT_MODEL=prompteur-claude
+    volumes:
+      - md-data:/data
+    networks:
+      - default
+      - ia
+volumes:
+  md-data:
+networks:
+  ia:
+    external: true
+    name: ia_default
