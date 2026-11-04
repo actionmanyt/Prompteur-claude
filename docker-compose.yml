@@ -1,20 +1,32 @@
 services:
   md-converter:
-    build: .
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-inconnu}
     container_name: md-converter
     restart: unless-stopped
     ports:
       - "8093:8000"
+    env_file:
+      - .env
     environment:
       - OLLAMA_URL=http://ia-ollama-1:11434
       - PROMPT_MODEL=prompteur-claude
+      - FALLBACK_MODEL=qwen3:4b-instruct
     volumes:
-      - md-data:/data
+      - ./data:/data
+    # GPU donné au conteneur uniquement pour lire nvidia-smi (page Admin), presque sans VRAM
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu, utility]
     networks:
       - default
       - ia
-volumes:
-  md-data:
 networks:
   ia:
     external: true

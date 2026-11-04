@@ -70,7 +70,7 @@
   <!-- 1.6 Export -->
   <h2><span class="num">1.6</span>Export du jeu de données</h2>
   <div class="card">
-    <p style="margin-top:0">Exporte les entrées marquées « prompt idéal » vers <code>dataset.jsonl</code> (idée, extrait, prompt idéal).</p>
+    <p style="margin-top:0">Exporte les entrées marquées « prompt idéal » vers <code>dataset.jsonl</code> (idée, sources, extrait des documents, prompt idéal).</p>
     <div class="row">
       <button class="btn primary" onclick="exportDataset()">Télécharger dataset.jsonl</button>
       <span class="muted" id="ideal-count"></span>
@@ -93,41 +93,50 @@
   </div>
 </dialog>
 
-<footer class="footer">© 2026 Prompteur Claude · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
+<footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
 
 <script>
 const REFRESH = 5000;
-const srcs = (h) => [].concat(h.source); // une entrée peut avoir plusieurs documents
+const srcs = (h) => [].concat(h.source);
 let hist = [];
 
 async function loadGpu() {
   try {
     const g = await api.get("/api/admin/gpu");
-    const pct = (v, m) => Math.min(100, Math.round((v / m) * 100)) + "%";
+    const pct = (v, m) => (m ? Math.min(100, Math.round((v / m) * 100)) : 0) + "%";
     $("#g-util").innerHTML = `${g.util} <small>%</small>`; $("#b-util").style.width = g.util + "%";
     $("#g-mem").innerHTML = `${(g.mem_used / 1024).toFixed(1)} <small>/ ${(g.mem_total / 1024).toFixed(0)} Go</small>`; $("#b-mem").style.width = pct(g.mem_used, g.mem_total);
     $("#g-temp").innerHTML = `${g.temp} <small>°C</small>`; $("#b-temp").style.width = pct(g.temp, 90);
     $("#g-pow").innerHTML = `${g.power} <small>/ ${g.power_limit} W</small>`; $("#b-pow").style.width = pct(g.power, g.power_limit);
     $("#b-temp").style.background = g.temp > 80 ? "var(--err)" : g.temp > 70 ? "var(--warn)" : "";
     $("#last").textContent = "mis à jour " + new Date().toLocaleTimeString("fr-FR");
-  } catch (e) { $("#last").textContent = "GPU injoignable (" + e.message + ")"; }
+  } catch (e) { $("#last").textContent = "GPU injoignable : " + e.message; }
 }
 
 async function loadPs() {
-  const { models } = await api.get("/api/admin/ps");
-  $("#ps").innerHTML = models.length ? models.map((m) => {
-    const min = Math.max(0, Math.round((new Date(m.expires_at) - Date.now()) / 60000));
-    return `<tr><td class="mono">${esc(m.name)}</td><td class="num">${(m.size_vram / 1e9).toFixed(1)} Go</td>
-            <td>${new Date(m.expires_at).toLocaleTimeString("fr-FR", { timeStyle: "short" })} <span class="muted">(dans ${min} min)</span></td></tr>`;
-  }).join("") : `<tr><td colspan="3" class="muted">Aucun modèle en VRAM.</td></tr>`;
+  try {
+    const { models } = await api.get("/api/admin/ps");
+    $("#ps").innerHTML = models.length ? models.map((m) => {
+      const min = Math.max(0, Math.round((new Date(m.expires_at) - Date.now()) / 60000));
+      return `<tr><td class="mono">${esc(m.name)}</td><td class="num">${(m.size_vram / 1e9).toFixed(1)} Go</td>
+              <td>${new Date(m.expires_at).toLocaleTimeString("fr-FR", { timeStyle: "short" })} <span class="muted">(dans ${min} min)</span></td></tr>`;
+    }).join("") : `<tr><td colspan="3" class="muted">Aucun modèle en VRAM.</td></tr>`;
+  } catch (e) { $("#ps").innerHTML = `<tr><td colspan="3"><span class="status err">${esc(e.message)}</span></td></tr>`; }
 }
 
 async function loadHealth() {
-  const h = await api.get("/api/admin/health");
-  const cls = { Up: "ok", Warn: "warn" };
-  $("#health").innerHTML = h.services.map((s) => `
-    <div><span class="status ${cls[s.state] || "err"}">${esc(s.name)}</span><div class="muted">${esc(s.detail)}</div></div>`).join("");
-  $("#version").innerHTML = `Version de l'app : <code>${esc(h.version)}</code> · commit <code>${esc(h.git)}</code>`;
+  try {
+    const h = await api.get("/api/admin/health");
+    const cls = { Up: "ok", Warn: "warn" };
+    $("#health").innerHTML = h.services.map((s) => `
+      <div><span class="status ${cls[s.state] || "err"}">${esc(s.name)}</span><div class="muted">${esc(s.detail)}</div></div>`).join("");
+    $("#version").innerHTML = `Version de l'app : <code>${esc(h.version)}</code> · commit <code>${esc(h.git)}</code>`;
+  } catch (e) { $("#health").innerHTML = `<span class="status err">${esc(e.message)}</span>`; }
+}
+
+async function loadHistory() {
+  try { hist = await api.get("/api/history"); } catch (e) { toast("Historique : " + e.message); }
+  renderHistory();
 }
 
 function renderHistory() {
@@ -137,7 +146,7 @@ function renderHistory() {
     <tr data-id="${h.id}">
       <td style="white-space:nowrap">${fmtDate(h.date)}</td>
       <td class="clip">${esc(h.idea)}</td>
-      <td class="clip mono" title="${esc(srcs(h).join(", "))}">${esc(srcs(h)[0])}${srcs(h).length > 1 ? ` <span class="tag">+${srcs(h).length - 1}</span>` : ""}</td>
+      <td class="clip mono" title="${esc(srcs(h).join(", "))}">${srcs(h).length ? esc(srcs(h)[0]) : '<span class="muted">aucun</span>'}${srcs(h).length > 1 ? ` <span class="tag">+${srcs(h).length - 1}</span>` : ""}</td>
       <td class="num">${h.tokens_before.toLocaleString("fr-FR")} → <strong>${h.tokens_after.toLocaleString("fr-FR")}</strong></td>
       <td class="num">${h.duration_s.toFixed(1)} s</td>
       <td class="mono">${esc(h.model)}</td>
@@ -148,35 +157,45 @@ function renderHistory() {
 
 function openDetail(id) {
   const h = hist.find((x) => x.id === id); if (!h) return;
+  const gain = h.tokens_before ? Math.round((1 - h.tokens_after / h.tokens_before) * 100) : 0;
   $("#d-title").textContent = h.idea;
   $("#d-meta").innerHTML = `
     <dt>Date</dt><dd>${fmtDate(h.date)}</dd>
-    <dt>Documents</dt><dd class="mono">${srcs(h).map(esc).join("<br>")}</dd>
-    <dt>Tokens</dt><dd>${h.tokens_before} → ${h.tokens_after} (−${Math.round((1 - h.tokens_after / h.tokens_before) * 100)} %)</dd>
+    <dt>Documents</dt><dd class="mono">${srcs(h).length ? srcs(h).map(esc).join("<br>") : "aucun"}</dd>
+    <dt>Tokens</dt><dd>${h.tokens_before} → ${h.tokens_after} (${gain >= 0 ? "−" : "+"}${Math.abs(gain)} %)</dd>
     <dt>Durée</dt><dd>${h.duration_s} s · <span class="mono">${esc(h.model)}</span></dd>`;
   $("#d-prompt").textContent = h.prompt;
-  $("#d-copy").onclick = () => copy(h.prompt);
+  $("#d-copy").onclick = () => copy($("#d-prompt").textContent);
   $("#d-regen").onclick = async () => {
     $("#d-regen").disabled = true; $("#d-prompt").textContent = "";
-    await fakeStream(h.prompt, (c) => ($("#d-prompt").textContent += c));
-    $("#d-regen").disabled = false; toast("Prompt régénéré (test)");
+    try {
+      await streamNdjson("/api/generate", { idea: h.idea, doc_ids: h.doc_ids, context_id: h.context_id, attach: h.attach }, (m) => {
+        if (m.error) throw new Error(m.error);
+        if (m.t) $("#d-prompt").textContent += m.t;
+        if (m.done) { $("#d-prompt").textContent = m.prompt; toast(`Nouveau prompt enregistré (${m.duration_s.toFixed(1)} s)`); }
+      });
+      await loadHistory();
+    } catch (e) { toast(e.message); $("#d-prompt").textContent = h.prompt; }
+    finally { $("#d-regen").disabled = false; }
   };
   const setIdeal = () => ($("#d-ideal").textContent = h.ideal ? "★ Retirer des idéaux" : "☆ Marquer comme prompt idéal");
   setIdeal();
   $("#d-ideal").onclick = async () => {
-    const r = await api.post(`/api/history/${h.id}/ideal`, {});
-    h.ideal = r.ideal ?? !h.ideal; setIdeal(); renderHistory();
+    try { const r = await api.post(`/api/history/${h.id}/ideal`, {}); h.ideal = r.ideal; setIdeal(); renderHistory(); }
+    catch (e) { toast(e.message); }
   };
   $("#detail").showModal();
 }
 
-function exportDataset() {
-  const lines = hist.filter((h) => h.ideal).map((h) => JSON.stringify({ idea: h.idea, sources: srcs(h), excerpt: "(extraits de " + srcs(h).join(", ") + ")", prompt: h.prompt }));
-  if (!lines.length) return toast("Aucune entrée marquée");
-  const blob = new Blob([lines.join("\n") + "\n"], { type: "application/jsonl" });
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: "dataset.jsonl" });
-  a.click(); URL.revokeObjectURL(a.href);
-  const pv = $("#export-preview"); pv.hidden = false; pv.textContent = lines.join("\n");
+async function exportDataset() {
+  if (!hist.some((h) => h.ideal)) return toast("Aucune entrée marquée");
+  try {
+    const r = await fetch("/api/admin/dataset.jsonl");
+    if (!r.ok) throw new Error("Erreur " + r.status);
+    const text = await r.text();
+    download("dataset.jsonl", text, "application/jsonl");
+    const pv = $("#export-preview"); pv.hidden = false; pv.textContent = text;
+  } catch (e) { toast("Export impossible : " + e.message); }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
@@ -184,7 +203,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#history").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openDetail(+tr.dataset.id); });
   $("#filter").addEventListener("input", renderHistory);
   $("#only-ideal").addEventListener("change", renderHistory);
-  hist = await api.get("/api/history"); renderHistory();
+  await loadHistory();
   loadGpu(); loadPs(); loadHealth();
   setInterval(() => { loadGpu(); loadPs(); }, REFRESH);
   setInterval(loadHealth, 30000);

@@ -22,8 +22,8 @@
 
 <main class="main">
   <div class="page-header">
-    <h1>Tchat Claude <span class="tag">optionnel</span></h1>
-    <p>Envoi direct d'un prompt à l'API, avec compteur de coût. Ollama reste en secours si l'API ne répond pas.</p>
+    <h1>Tchat Claude</h1>
+    <p>Envoi direct d'un prompt à l'API Claude avec votre clé, compteur de coût et plafond. Ollama répond en secours si l'API ne répond pas.</p>
   </div>
 
   <!-- 3.2 Compteur de coût -->
@@ -43,7 +43,6 @@
         <option value="sonnet">Claude Sonnet (qualité)</option>
       </select>
       <div class="row">
-        <label style="margin:0; display:flex; gap:6px; align-items:center"><input type="checkbox" id="sim-fail" style="width:auto"> Simuler une panne API</label>
         <button class="btn" id="clear">Nouvelle conversation</button>
       </div>
     </div>
@@ -59,15 +58,18 @@
   <!-- 3.4 Réglages API -->
   <h2><span class="num">3.4</span>Réglages API</h2>
   <div class="card">
-    <label for="key">Clé API</label>
-    <input id="key" type="password" value="" placeholder="Lue depuis la variable ANTHROPIC_API_KEY du conteneur" disabled>
-    <p class="muted" style="margin:4px 0 0">Jamais saisie ici ni stockée dans <code>app.py</code> : variable d'environnement ou Vaultwarden. État : <span class="status ok" id="key-state">détectée (test)</span></p>
+    <label for="key" style="margin-top:0">Votre clé API Anthropic</label>
+    <div class="row">
+      <input id="key" type="password" autocomplete="off" placeholder="sk-ant-…" style="flex:1; min-width:200px">
+      <button class="btn" id="key-del" hidden>Supprimer la clé</button>
+    </div>
+    <p class="muted" style="margin:4px 0 0">Stockée chiffrée sur le serveur, propre à votre compte, jamais réaffichée. État : <span class="status err" id="key-state">aucune clé</span></p>
     <div class="grid" style="margin-top:8px">
-      <div><label for="cap">Plafond mensuel ($)</label><input id="cap" type="number" min="0" step="1" value="5"></div>
+      <div><label for="cap">Plafond mensuel ($, 0 = aucun)</label><input id="cap" type="number" min="0" step="1" value="5"></div>
       <div><label for="default-model">Modèle par défaut</label>
         <select id="default-model"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option></select></div>
     </div>
-    <p class="muted">Tarifs utilisés pour l'estimation ($ par million de tokens, entrée / sortie) — à vérifier sur la page tarifs d'Anthropic :</p>
+    <p class="muted">Tarifs utilisés pour le coût ($ par million de tokens, entrée / sortie) — à vérifier sur la page des tarifs d'Anthropic. Modèles : <span class="mono" id="model-ids"></span></p>
     <div class="grid">
       <div><label>Haiku entrée / sortie</label><div class="row"><input id="p-h-in" type="number" step="0.01" value="1" style="flex:1"><input id="p-h-out" type="number" step="0.01" value="5" style="flex:1"></div></div>
       <div><label>Sonnet entrée / sortie</label><div class="row"><input id="p-s-in" type="number" step="0.01" value="3" style="flex:1"><input id="p-s-out" type="number" step="0.01" value="15" style="flex:1"></div></div>
@@ -76,15 +78,15 @@
   </div>
 </main>
 
-<footer class="footer">© 2026 Prompteur Claude · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
+<footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
 
 <script>
-let thread = [], month = { cost: 0.42, tokens: 61200 }; // cumul fictif de départ
+let thread = [], month = { cost: 0, tokens: 0 };
 
 const price = (m) => m === "sonnet"
   ? { in: +$("#p-s-in").value, out: +$("#p-s-out").value }
   : { in: +$("#p-h-in").value, out: +$("#p-h-out").value };
-const money = (v, d = 2) => v.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+const money = (v, d = 2) => (+v || 0).toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
 
 function renderCost(last) {
   const cap = +$("#cap").value || 0;
@@ -103,49 +105,82 @@ function renderCost(last) {
 function renderThread() {
   $("#chat").innerHTML = thread.length ? thread.map((m, i) =>
     `<div class="msg ${m.role === "user" ? "user" : "bot"}" id="m${i}">${esc(m.text)}${m.meta ? `<span class="muted">${esc(m.meta)}</span>` : ""}</div>`).join("")
-    : `<p class="muted" style="margin:0">Aucun message.</p>`;
+    : `<p class="muted" style="margin:0">Aucun message. Collez un prompt ou venez de la page Utilisation.</p>`;
   $("#chat").scrollTop = $("#chat").scrollHeight;
 }
 
 function estimate() {
-  const t = tokens($("#msg").value), p = price($("#model").value);
-  $("#est").textContent = t ? `≈ ${t} tokens d'entrée · ≈ ${money((t * p.in) / 1e6, 4)} $ avant réponse` : "";
+  const t = tokens($("#msg").value) + thread.reduce((n, m) => n + tokens(m.text), 0), p = price($("#model").value);
+  $("#est").textContent = $("#msg").value.trim() ? `≈ ${t} tokens d'entrée (tout le fil est renvoyé) · ≈ ${money((t * p.in) / 1e6, 4)} $ avant réponse` : "";
 }
 
 async function send() {
   const text = $("#msg").value.trim(); if (!text) return;
   const model = $("#model").value, cap = +$("#cap").value || 0;
   if (cap && month.cost >= cap) return toast("Plafond mensuel atteint : envoi bloqué");
+  const messages = thread.filter((m) => m.text.trim() && !m.error).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }))
+    .concat([{ role: "user", content: text }]);
   thread.push({ role: "user", text }); $("#msg").value = ""; estimate();
   const bot = { role: "bot", text: "" }; thread.push(bot); renderThread();
   $("#send").disabled = true;
   const el = $("#m" + (thread.length - 1));
-
-  const fail = $("#sim-fail").checked;
-  const answer = fail
-    ? "(Réponse de secours rédigée par Ollama / prompteur-claude, l'API Claude n'a pas répondu.)\nVoici une réponse locale courte au prompt envoyé."
-    : "Voici une réponse de test de Claude.\n\n- Point 1 : le devis est cohérent avec le besoin.\n- Point 2 : une alternative d'occasion coûte environ 40 % de moins.\n\nRecommandation : à valider selon votre budget.";
-  await fakeStream(answer, (c) => { bot.text += c; el.textContent = bot.text; $("#chat").scrollTop = 1e9; }, 22);
-
-  const ctxTok = thread.slice(0, -1).reduce((n, m) => n + tokens(m.text), 0); // tout le fil est renvoyé
-  const tin = ctxTok, tout = tokens(answer), p = price(model);
-  const cost = fail ? 0 : (tin * p.in + tout * p.out) / 1e6;
-  bot.meta = fail ? "Ollama (secours) · 0 $" : `${model} · ${tin} + ${tout} tokens · ${money(cost, 4)} $`;
-  if (!fail) { month.cost += cost; month.tokens += tin + tout; }
-  renderThread(); renderCost({ cost, tin, tout, model: fail ? "ollama" : model });
-  $("#send").disabled = false;
+  try {
+    await streamNdjson("/api/chat", { model, messages }, (m) => {
+      if (m.t) { bot.text += m.t; el.textContent = bot.text; $("#chat").scrollTop = 1e9; }
+      if (m.error) { bot.text += `\n[${m.error}]`; el.textContent = bot.text; }
+      if (m.done) {
+        bot.meta = m.fallback ? `Ollama (secours) · 0 $` : `${m.model} · ${m.tokens_in} + ${m.tokens_out} tokens · ${money(m.cost, 4)} $`;
+        if (m.fallback) bot.fallback = true;
+        month = { cost: m.month_cost, tokens: m.month_tokens };
+        renderCost({ cost: m.cost, tin: m.tokens_in, tout: m.tokens_out, model: m.model });
+      }
+    });
+  } catch (e) {
+    bot.text = bot.text || `[${e.message}]`; bot.error = !bot.text.trim() || bot.text.startsWith("[");
+    if (/Plafond/.test(e.message)) toast(e.message);
+  }
+  renderThread(); $("#send").disabled = false;
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+async function loadSettings() {
+  try {
+    const [s, u] = await Promise.all([api.get("/api/chat/settings"), api.get("/api/chat/usage")]);
+    applySettings(s); month = { cost: u.month_cost, tokens: u.month_tokens };
+  } catch (e) { toast("Réglages : " + e.message); }
+  renderCost();
+}
+function applySettings(s) {
+  $("#key").value = "";
+  $("#key").placeholder = s.has_key ? `Clé enregistrée (${s.key_hint}) : laissez vide pour la garder` : "sk-ant-…";
+  $("#key-state").className = "status " + (s.has_key ? "ok" : "err");
+  $("#key-state").textContent = s.has_key ? "enregistrée " + s.key_hint : "aucune clé (réponses par Ollama en secours)";
+  $("#key-del").hidden = !s.has_key;
+  $("#cap").value = s.cap; $("#default-model").value = s.default_model; $("#model").value = s.default_model;
+  $("#p-h-in").value = s.prices.haiku.in; $("#p-h-out").value = s.prices.haiku.out;
+  $("#p-s-in").value = s.prices.sonnet.in; $("#p-s-out").value = s.prices.sonnet.out;
+  $("#model-ids").textContent = `${s.models.haiku}, ${s.models.sonnet}`;
+}
+async function saveSettings(deleteKey = false) {
+  const body = {
+    api_key: $("#key").value.trim() || null, delete_key: deleteKey,
+    cap: +$("#cap").value || 0, default_model: $("#default-model").value,
+    prices: { haiku: { in: +$("#p-h-in").value, out: +$("#p-h-out").value }, sonnet: { in: +$("#p-s-in").value, out: +$("#p-s-out").value } },
+  };
+  try { applySettings(await api.post("/api/chat/settings", body)); toast(deleteKey ? "Clé supprimée" : "Réglages enregistrés"); renderCost(); estimate(); }
+  catch (e) { toast(e.message); }
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
   try { const p = sessionStorage.getItem("last-prompt"); if (p) { $("#msg").value = p; sessionStorage.removeItem("last-prompt"); } } catch (e) {}
-  $("#model").value = $("#default-model").value;
+  await loadSettings();
   $("#msg").addEventListener("input", estimate); $("#model").addEventListener("change", estimate);
   $("#send").addEventListener("click", send);
   $("#msg").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send(); });
-  $("#clear").addEventListener("click", () => { thread = []; renderThread(); });
+  $("#clear").addEventListener("click", () => { thread = []; renderThread(); estimate(); });
   $("#cap").addEventListener("input", () => renderCost());
-  $("#save").addEventListener("click", () => { $("#model").value = $("#default-model").value; toast("Réglages enregistrés (test)"); renderCost(); });
-  estimate(); renderCost();
+  $("#save").addEventListener("click", () => saveSettings(false));
+  $("#key-del").addEventListener("click", () => { if (confirm("Supprimer votre clé API du serveur ?")) saveSettings(true); });
+  estimate();
 });
 </script>
 </body>

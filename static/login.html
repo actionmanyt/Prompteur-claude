@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Connexion · Prompteur Claude</title>
+<meta name="theme-color" content="#0b2420">
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body data-page="login">
+<header>
+  <nav class="nav">
+    <div class="logo"><span>Prompteur Claude</span><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
+  </nav>
+</header>
+
+<main class="main" style="max-width:480px">
+  <div class="page-header">
+    <h1>Connexion</h1>
+    <p>Vos documents et votre clé API sont stockés sur le serveur : connectez-vous pour y accéder.</p>
+  </div>
+  <form class="card" id="form">
+    <label for="user" style="margin-top:0">Identifiant</label>
+    <input id="user" autocomplete="username" required autofocus>
+    <label for="pw">Mot de passe</label>
+    <input id="pw" type="password" autocomplete="current-password" required>
+    <div class="row" style="margin-top:16px">
+      <button class="btn primary" type="submit" id="go">Se connecter</button>
+      <span class="status err" id="err" hidden></span>
+    </div>
+  </form>
+</main>
+
+<footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
+
+<script>
+$("#form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  $("#go").disabled = true; $("#err").hidden = true;
+  try {
+    await api.post("/api/login", { username: $("#user").value, password: $("#pw").value });
+    location.href = "/";
+  } catch (err) {
+    $("#err").textContent = err.message; $("#err").hidden = false;
+  } finally { $("#go").disabled = false; }
+});
+</script>
+</body>
+</html>

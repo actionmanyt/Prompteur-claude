@@ -23,15 +23,19 @@
 <main class="main">
   <div class="page-header">
     <h1>Utilisation</h1>
-    <p>Une idée + un document → un prompt court (Contexte, Tâche, Contraintes, Format).</p>
+    <p>Une idée + des documents → un prompt court (Contexte, Tâche, Contraintes, Format).</p>
   </div>
 
   <!-- 2.1 Bibliothèque -->
   <h2><span class="num">2.1</span>Bibliothèque de documents</h2>
   <div class="drop" id="drop">
     <strong>Glissez vos fichiers ici</strong> ou cliquez pour choisir<br>
-    <span class="muted">PDF, Office, LibreOffice, mails, images, HTML, texte, EPUB, ZIP, audio… · 50 Mo max</span>
+    <span class="muted">PDF, Word, PowerPoint, Excel, mails, HTML, texte, EPUB, ZIP… · 50 Mo max</span>
     <input type="file" id="file" multiple hidden>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <input type="url" id="url" placeholder="… ou une adresse web : https://…" style="flex:1; min-width:200px">
+    <button class="btn" id="url-go">Importer la page</button>
   </div>
 
   <!-- 2.5 Recherche -->
@@ -44,7 +48,7 @@
   <div class="table-wrap">
     <table>
       <thead><tr><th title="Utiliser dans le prompt"><input type="checkbox" id="sel-all" style="width:auto" title="Tout sélectionner"></th><th>Nom</th><th>Type détecté</th><th>Date</th><th class="num">Taille</th><th class="num">Tokens</th><th>Étiquettes</th><th>Statut</th></tr></thead>
-      <tbody id="lib"></tbody>
+      <tbody id="lib"><tr><td colspan="8" class="muted">Chargement…</td></tr></tbody>
     </table>
   </div>
 
@@ -60,7 +64,7 @@
   <!-- 2.3 Aperçu -->
   <h2><span class="num">2.3</span>Aperçu Markdown en cache</h2>
   <div class="card" id="preview">
-    <p class="muted" style="margin:0">Sélectionnez un document dans la bibliothèque.</p>
+    <p class="muted" style="margin:0">Cliquez sur un document de la bibliothèque.</p>
   </div>
 
   <!-- 2.4 Composer -->
@@ -71,11 +75,27 @@
         <select id="c-add"></select></div>
       <div><label for="c-ctx">Contexte enregistré</label><select id="c-ctx"></select></div>
     </div>
+    <details style="margin-top:8px">
+      <summary class="muted" style="cursor:pointer">Gérer les contextes</summary>
+      <label for="ctx-name">Nom</label>
+      <input id="ctx-name" placeholder="Ex. : Homelab (matériel)">
+      <label for="ctx-text">Texte</label>
+      <textarea id="ctx-text" class="mono"></textarea>
+      <div class="row" style="margin-top:10px">
+        <button class="btn primary" id="ctx-save">Enregistrer</button>
+        <button class="btn" id="ctx-new">Nouveau contexte</button>
+        <button class="btn" id="ctx-del">Supprimer</button>
+      </div>
+    </details>
     <label>Documents utilisés <span id="c-count"></span></label>
     <ul class="tags" id="c-docs"></ul>
     <div class="bar" title="Part de num_ctx (8192 tokens) utilisée"><span id="c-budget"></span></div>
     <p class="muted" id="c-budget-txt" style="margin:4px 0 0"></p>
+    <label style="display:flex; gap:6px; align-items:center; color:var(--primary)">
+      <input type="checkbox" id="c-attach" checked style="width:auto"> Joindre les sections gardées des documents après le prompt
+    </label>
     <label for="c-idea">Votre idée</label>
+    <div class="row" id="tpl" style="margin-bottom:8px; gap:6px"></div>
     <textarea id="c-idea" placeholder="Ex. : dis-moi si ce devis est un bon choix pour mon serveur"></textarea>
     <div class="row" style="margin-top:12px">
       <button class="btn primary" id="c-go">Générer le prompt</button>
@@ -84,35 +104,52 @@
     <pre class="prompt" id="c-out" hidden></pre>
     <div class="row" id="c-actions" hidden>
       <button class="btn" id="c-copy">Recopier</button>
+      <button class="btn" id="c-dl">Télécharger .md</button>
       <a class="btn" href="chat.html" id="c-send">Envoyer à Claude →</a>
       <span class="muted" id="c-tok"></span>
     </div>
   </div>
 </main>
 
-<footer class="footer">© 2026 Prompteur Claude · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
+<footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
 
 <script>
 const MAX_SIZE = 50 * 1024 * 1024;
+const NUM_CTX = 8192, RESERVE = 1200, BUDGET = NUM_CTX - RESERVE; // comme le serveur
 const FAMILIES = [
-  { fam: "Bureautique Microsoft", ext: ["docx","pptx","xlsx","doc","xls","ppt"], tool: "Convertisseurs actuels, LibreOffice sans affichage (anciens formats)" },
-  { fam: "Bureautique libre", ext: ["odt","ods","odp","rtf"], tool: "LibreOffice sans affichage ou pandoc" },
-  { fam: "Mails", ext: ["msg","eml"], tool: "extract-msg, email (Python)" },
-  { fam: "PDF", ext: ["pdf"], tool: "Extraction actuelle, OCR Tesseract si aucun texte" },
-  { fam: "Images", ext: ["png","jpg","jpeg","tif","tiff","webp"], tool: "OCR Tesseract (fra + eng)" },
-  { fam: "Web", ext: ["html","htm","mhtml"], tool: "Convertisseur actuel / .html enregistré" },
-  { fam: "Texte et données", ext: ["txt","md","csv","json","xml","yaml","yml","py","js","sh"], tool: "Lecture directe, CSV en tableau" },
-  { fam: "Livres", ext: ["epub"], tool: "pandoc" },
-  { fam: "Archives", ext: ["zip"], tool: "Décompression contrôlée, puis conversion de chaque fichier" },
-  { fam: "Audio et vidéo", ext: ["mp3","wav","mp4"], tool: "Whisper small sur CPU (optionnel)" },
+  { fam: "Bureautique Microsoft", ext: ["docx", "pptx", "xlsx", "xls"], tool: "MarkItDown" },
+  { fam: "Mails", ext: ["msg", "eml"], tool: "MarkItDown (Outlook), module email de Python · pièces jointes non converties" },
+  { fam: "PDF (texte)", ext: ["pdf"], tool: "pymupdf4llm, sinon MarkItDown" },
+  { fam: "Web", ext: ["html", "htm"], tool: "MarkItDown · adresse web : trafilatura" },
+  { fam: "Texte et données", ext: ["txt", "md", "csv", "json", "xml", "yaml", "yml", "py", "js", "sh"], tool: "Lecture directe, CSV en tableau" },
+  { fam: "Livres", ext: ["epub"], tool: "MarkItDown" },
+  { fam: "Archives", ext: ["zip"], tool: "MarkItDown, avec contrôle de la taille décompressée" },
+  { fam: "Pas encore pris en charge", ext: ["doc", "ppt", "odt", "ods", "odp", "rtf", "png", "jpg", "tiff", "mp3", "wav", "mp4"], tool: "À venir : LibreOffice, OCR Tesseract, Whisper" },
 ];
-const detect = (name) => {
-  const ext = name.split(".").pop().toLowerCase();
-  return FAMILIES.find((f) => f.ext.includes(ext)) || null;
+const TEMPLATES = {
+  "Résumer": "Résume le document ci-dessous en 5 points clés, phrases courtes.",
+  "Expliquer simplement": "Explique le document ci-dessous simplement, comme à un débutant, avec un exemple concret.",
+  "Chiffres clés": "Extrais les chiffres, dates et données clés du document ci-dessous, sous forme de tableau.",
+  "Corriger": "Corrige l'orthographe et améliore le style du texte ci-dessous sans changer le sens, puis liste les principales modifications.",
+  "Traduire": "Traduis le document ci-dessous en anglais en gardant la mise en forme markdown.",
+  "Analyser": "Analyse le document ci-dessous : points forts, points faibles et recommandations concrètes.",
+  "Questions": "Pose-moi 5 questions pour vérifier que j'ai bien compris le document ci-dessous, avec les réponses à la fin.",
 };
 
-let lib = [], contexts = [], current = null;
+let lib = [], contexts = [], current = null, pollTimer = null, lastPrompt = "";
+const selected = new Set();
 const statusCls = { "prêt": "ok", "en cours": "warn" };
+const byId = (id) => lib.find((d) => String(d.id) === String(id));
+
+/* ---------- Bibliothèque ---------- */
+async function loadLib() {
+  try { lib = await api.get("/api/library"); } catch (e) { toast("Bibliothèque : " + e.message); return; }
+  [...selected].forEach((id) => { const d = byId(id); if (!d || d.status !== "prêt") selected.delete(id); });
+  renderLib();
+  clearTimeout(pollTimer);
+  if (lib.some((d) => d.status === "en cours")) pollTimer = setTimeout(loadLib, 2000);
+  if (current && byId(current.id) && byId(current.id).status !== current.status) showPreview(current.id);
+}
 
 function renderLib() {
   const q = $("#search").value.toLowerCase(), tag = $("#tag-filter").value, since = $("#date-filter").value;
@@ -123,14 +160,14 @@ function renderLib() {
   $("#lib").innerHTML = rows.map((d) => `
     <tr data-id="${d.id}">
       <td><input type="checkbox" class="pick" data-id="${d.id}" style="width:auto" ${selected.has(String(d.id)) ? "checked" : ""} ${d.status === "prêt" ? "" : "disabled"}></td>
-      <td class="clip mono">${esc(d.name)}</td>
+      <td class="clip mono" title="${esc(d.name)}">${esc(d.name)}</td>
       <td>${esc(d.type)}</td>
       <td style="white-space:nowrap">${fmtDate(d.date)}</td>
       <td class="num">${fmtSize(d.size)}</td>
       <td class="num">${d.tokens ? d.tokens.toLocaleString("fr-FR") : "–"}</td>
       <td><ul class="tags">${d.tags.map((t) => `<li class="tag">${esc(t)}</li>`).join("")}</ul></td>
-      <td><span class="status ${statusCls[d.status] || "err"}">${esc(d.status)}</span></td>
-    </tr>`).join("") || `<tr><td colspan="8" class="muted">Aucun document.</td></tr>`;
+      <td><span class="status ${statusCls[d.status] || "err"}" title="${esc(d.error || "")}">${esc(d.status)}</span></td>
+    </tr>`).join("") || `<tr><td colspan="8" class="muted">${lib.length ? "Aucun document ne correspond." : "Aucun document : envoyez-en un ci-dessus."}</td></tr>`;
 
   const tags = [...new Set(lib.flatMap((d) => d.tags))].sort();
   const sel = $("#tag-filter").value;
@@ -138,11 +175,29 @@ function renderLib() {
   renderSelection();
 }
 
-/* ---------- Sélection de plusieurs documents ---------- */
-const NUM_CTX = 8192, RESERVE = 1200; // place gardée pour l'idée, le contexte et la consigne du Modelfile
-const selected = new Set();
-const docTokens = (d) => d.sections ? d.sections.filter((s) => s.on).reduce((n, s) => n + tokens(s.text), 0) : d.tokens;
+async function addFiles(files) {
+  const fd = new FormData(); let n = 0;
+  [...files].forEach((f) => {
+    if (f.size > MAX_SIZE) return toast(`${f.name} : trop volumineux (50 Mo max)`);
+    fd.append("files", f, f.name); n++;
+  });
+  if (!n) return;
+  toast(`Envoi de ${n} fichier(s)…`);
+  try {
+    const res = await api.upload("/api/library", fd);
+    res.filter((r) => r.error).forEach((r) => toast(`${r.name} : ${r.error}`));
+  } catch (e) { toast("Envoi impossible : " + e.message); }
+  $("#file").value = "";
+  loadLib();
+}
 
+async function addUrl() {
+  const url = $("#url").value.trim(); if (!url) return;
+  try { await api.post("/api/library/url", { url }); $("#url").value = ""; toast("Page en cours d'import…"); loadLib(); }
+  catch (e) { toast(e.message); }
+}
+
+/* ---------- Sélection de plusieurs documents ---------- */
 function toggleDoc(id, on) {
   id = String(id);
   on ? selected.add(id) : selected.delete(id);
@@ -150,103 +205,152 @@ function toggleDoc(id, on) {
 }
 
 function renderSelection() {
-  const docs = [...selected].map((id) => lib.find((d) => String(d.id) === id)).filter(Boolean);
-  const total = docs.reduce((n, d) => n + docTokens(d), 0);
-  const budget = NUM_CTX - RESERVE, pct = Math.min(100, (total / budget) * 100);
-
+  const docs = [...selected].map(byId).filter(Boolean);
+  const total = docs.reduce((n, d) => n + d.tokens, 0);
+  const pct = Math.min(100, (total / BUDGET) * 100);
   $("#c-count").textContent = docs.length ? `(${docs.length})` : "";
   $("#c-docs").innerHTML = docs.length
-    ? docs.map((d) => `<li class="tag" style="color:var(--primary)">${esc(d.name)} · ${docTokens(d)}
+    ? docs.map((d) => `<li class="tag" style="color:var(--primary)">${esc(d.name)} · ${d.tokens}
         <button data-rm="${d.id}" title="Retirer" style="background:none;border:0;color:var(--secondary);cursor:pointer;padding:0 0 0 6px;font-size:14px">✕</button></li>`).join("")
     : `<li class="muted">Aucun : cochez des documents dans la bibliothèque ou ajoutez-les ci-dessus.</li>`;
   $("#c-budget").style.width = pct + "%";
-  $("#c-budget").style.background = total > budget ? "var(--err)" : pct > 80 ? "var(--warn)" : "";
-  $("#c-budget-txt").innerHTML = total > budget
-    ? `<span class="status err">${total.toLocaleString("fr-FR")} tokens : trop pour num_ctx (${budget.toLocaleString("fr-FR")} disponibles). Retirez un document ou des sections.</span>`
-    : `${total.toLocaleString("fr-FR")} / ${budget.toLocaleString("fr-FR")} tokens de documents (num_ctx ${NUM_CTX} moins ${RESERVE} réservés)`;
-  $("#c-go").disabled = total > budget;
+  $("#c-budget").style.background = total > BUDGET ? "var(--err)" : pct > 80 ? "var(--warn)" : "";
+  $("#c-budget-txt").innerHTML = total > BUDGET
+    ? `<span class="status err">${total.toLocaleString("fr-FR")} tokens : trop pour num_ctx (${BUDGET.toLocaleString("fr-FR")} disponibles). Retirez un document ou des sections.</span>`
+    : `${total.toLocaleString("fr-FR")} / ${BUDGET.toLocaleString("fr-FR")} tokens de documents (num_ctx ${NUM_CTX} moins ${RESERVE} réservés)`;
+  $("#c-go").disabled = total > BUDGET;
 
   const ready = lib.filter((d) => d.status === "prêt" && !selected.has(String(d.id)));
-  $("#c-add").innerHTML = `<option value="">${ready.length ? "Choisir…" : "Tous les documents prêts sont ajoutés"}</option>` +
-    ready.map((d) => `<option value="${d.id}">${esc(d.name)} (${docTokens(d)} tokens)</option>`).join("");
-
+  $("#c-add").innerHTML = `<option value="">${ready.length ? "Choisir…" : "Aucun autre document prêt"}</option>` +
+    ready.map((d) => `<option value="${d.id}">${esc(d.name)} (${d.tokens} tokens)</option>`).join("");
   const picks = lib.filter((d) => d.status === "prêt");
   $("#sel-all").checked = picks.length > 0 && picks.every((d) => selected.has(String(d.id)));
 }
 
-function fakeMarkdown(d) {
-  return [
-    { title: "Résumé", text: `Document « ${d.name} » converti en Markdown allégé.` },
-    { title: "Informations principales", text: "- Élément 1 : valeur\n- Élément 2 : valeur\n- Élément 3 : valeur" },
-    { title: "Détails", text: "Paragraphe de détails assez long, gardé ou retiré selon le besoin. ".repeat(12) },
-    { title: "Mentions légales", text: "Texte peu utile pour le prompt. ".repeat(20) },
-  ];
-}
-
-function showPreview(d) {
+/* ---------- Aperçu ---------- */
+async function showPreview(id) {
+  let d;
+  try { d = await api.get(`/api/library/${id}`); } catch (e) { return toast(e.message); }
   current = d;
-  if (d.status === "non pris en charge") {
-    $("#preview").innerHTML = `<h3>${esc(d.name)}</h3><p><span class="status err">Format non pris en charge</span></p>
-      <p class="muted">Convertissez-le en PDF ou DOCX, puis renvoyez-le.</p>`; return;
+  const head = `<div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(d.name)}</h3>
+    <div class="row"><button class="btn" id="p-del">Supprimer</button></div></div>`;
+  const tagsRow = `<div class="row" style="margin-top:12px"><input id="p-tags" value="${esc(d.tags.join(", "))}" placeholder="Étiquettes, séparées par des virgules" style="flex:1; min-width:180px">
+    <button class="btn" id="p-tags-save">Enregistrer les étiquettes</button></div>`;
+  if (d.status !== "prêt") {
+    const msg = d.status === "en cours"
+      ? `<p><span class="status warn">Conversion en cours…</span></p><p class="muted">La page reste utilisable pendant ce temps.</p>`
+      : `<p><span class="status err">${esc(d.status)}</span></p><p class="muted">${esc(d.error || "")}</p>`;
+    $("#preview").innerHTML = head + msg + tagsRow;
+  } else {
+    const secs = d.sections;
+    const full = d.tokens_full, kept = d.tokens;
+    const shown = secs.filter((s) => s.on).map((s) => s.text).join("\n\n");
+    const LIMIT = 20000;
+    $("#preview").innerHTML = head + `
+      <p class="muted" style="margin:8px 0 0">Tokens : ${full.toLocaleString("fr-FR")} avant → <strong>${kept.toLocaleString("fr-FR")}</strong> après choix des sections${d.source_url ? ` · <a href="${esc(d.source_url)}" target="_blank" rel="noopener">source</a>` : ""}</p>
+      <div class="bar"><span style="width:${Math.round((kept / Math.max(full, 1)) * 100)}%"></span></div>
+      <p class="muted" style="margin:12px 0 4px">Sections à garder :
+        <button class="btn" id="p-all" style="padding:2px 10px">Tout</button> <button class="btn" id="p-none" style="padding:2px 10px">Rien</button></p>
+      <div class="row" style="max-height:220px; overflow:auto">${secs.map((s, i) => `<label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--primary)">
+        <input type="checkbox" data-sec="${i}" ${s.on ? "checked" : ""} style="width:auto"> ${esc(s.title)} <span class="muted">(${s.tokens})</span></label>`).join("")}</div>
+      <pre class="prompt">${esc(shown.slice(0, LIMIT))}${shown.length > LIMIT ? "\n\n[… aperçu coupé, le document complet est utilisé]" : ""}</pre>
+      ${kept > BUDGET ? `<p class="status warn">Dépasse le budget de ${BUDGET} tokens : retirez des sections.</p>` : ""}
+      <div class="row"><button class="btn" id="p-use">${selected.has(String(d.id)) ? "✓ Utilisé dans le prompt" : "+ Utiliser dans le prompt"}</button></div>` + tagsRow;
+    const saveSecs = async (on) => {
+      try {
+        const s = await api.patch(`/api/library/${d.id}`, { sections_on: on });
+        Object.assign(byId(d.id) || {}, s); renderLib(); showPreview(d.id);
+      } catch (e) { toast(e.message); }
+    };
+    $("#preview").querySelectorAll("[data-sec]").forEach((c) => c.addEventListener("change", () =>
+      saveSecs(secs.map((s, i) => (i === +c.dataset.sec ? c.checked : s.on)))));
+    $("#p-all").onclick = () => saveSecs(secs.map(() => true));
+    $("#p-none").onclick = () => saveSecs(secs.map(() => false));
+    $("#p-use").onclick = () => { toggleDoc(d.id, !selected.has(String(d.id))); showPreview(d.id); };
   }
-  if (d.status === "en cours") {
-    $("#preview").innerHTML = `<h3>${esc(d.name)}</h3><p><span class="status warn">Conversion en cours (OCR)…</span></p>
-      <p class="muted">La page reste utilisable pendant ce temps.</p>`; return;
-  }
-  const secs = d.sections || (d.sections = fakeMarkdown(d).map((s) => ({ ...s, on: s.title !== "Mentions légales" })));
-  const full = secs.reduce((n, s) => n + tokens(s.text), 0);
-  const kept = secs.filter((s) => s.on).reduce((n, s) => n + tokens(s.text), 0);
-  $("#preview").innerHTML = `
-    <div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(d.name)}</h3>
-      <span class="muted">Tokens : ${full} avant → <strong>${kept}</strong> après allègement</span></div>
-    <div class="bar"><span style="width:${Math.round((kept / Math.max(full, 1)) * 100)}%"></span></div>
-    <p class="muted" style="margin:12px 0 4px">Sections à garder :</p>
-    <div class="row">${secs.map((s, i) => `<label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--primary)">
-      <input type="checkbox" data-sec="${i}" ${s.on ? "checked" : ""} style="width:auto"> ${esc(s.title)} <span class="muted">(${tokens(s.text)})</span></label>`).join("")}</div>
-    <pre class="prompt">${secs.filter((s) => s.on).map((s) => `## ${esc(s.title)}\n${esc(s.text)}`).join("\n\n")}</pre>
-    ${kept > 8192 ? `<p class="status warn">Dépasse num_ctx (8192) : retirez des sections.</p>` : ""}`;
-  $("#preview").querySelectorAll("[data-sec]").forEach((c) => c.addEventListener("change", () => { secs[c.dataset.sec].on = c.checked; showPreview(d); renderSelection(); }));
-  $("#preview").insertAdjacentHTML("beforeend", `<div class="row"><button class="btn" id="p-use">${selected.has(String(d.id)) ? "✓ Utilisé dans le prompt" : "+ Utiliser dans le prompt"}</button></div>`);
-  $("#p-use").onclick = () => { toggleDoc(d.id, !selected.has(String(d.id))); showPreview(d); };
+  $("#p-tags-save").onclick = async () => {
+    try {
+      const s = await api.patch(`/api/library/${d.id}`, { tags: $("#p-tags").value.split(",") });
+      Object.assign(byId(d.id) || {}, s); renderLib(); toast("Étiquettes enregistrées");
+    } catch (e) { toast(e.message); }
+  };
+  $("#p-del").onclick = async () => {
+    if (!confirm(`Supprimer « ${d.name} » de la bibliothèque ?`)) return;
+    try { await api.del(`/api/library/${d.id}`); selected.delete(String(d.id)); current = null;
+      $("#preview").innerHTML = `<p class="muted" style="margin:0">Document supprimé.</p>`; loadLib(); }
+    catch (e) { toast(e.message); }
+  };
 }
 
-function addFiles(files) {
-  [...files].forEach((f) => {
-    if (f.size > MAX_SIZE) return toast(`${f.name} : trop volumineux (max 50 Mo)`);
-    const fam = detect(f.name);
-    const slow = fam && ["Images", "Audio et vidéo"].includes(fam.fam);
-    const doc = { id: Date.now() + Math.random(), name: f.name, type: fam ? fam.fam : "Inconnu", date: new Date().toISOString(),
-      size: f.size, tokens: 0, tags: [], status: fam ? "en cours" : "non pris en charge" };
-    lib.unshift(doc);
-    if (fam) setTimeout(() => { doc.status = "prêt"; doc.tokens = Math.round(f.size / 40) || 120; renderLib(); toast(`${f.name} converti`); }, slow ? 4000 : 1200);
-  });
-  renderLib();
+/* ---------- Contextes ---------- */
+function renderContexts(selectId) {
+  const keep = selectId ?? $("#c-ctx").value;
+  $("#c-ctx").innerHTML = `<option value="">Aucun</option>` + contexts.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  $("#c-ctx").value = contexts.some((c) => String(c.id) === String(keep)) ? keep : "";
+  fillContext();
+}
+function fillContext() {
+  const c = contexts.find((x) => String(x.id) === $("#c-ctx").value);
+  $("#ctx-name").value = c ? c.name : ""; $("#ctx-text").value = c ? c.text : "";
+  try { localStorage.setItem("ctx-id", $("#c-ctx").value); } catch (e) {}
+}
+async function saveContext() {
+  const body = { name: $("#ctx-name").value, text: $("#ctx-text").value }, id = $("#c-ctx").value;
+  try {
+    const c = id ? await api.put(`/api/contexts/${id}`, body) : await api.post("/api/contexts", body);
+    contexts = await api.get("/api/contexts"); renderContexts(c.id); toast("Contexte enregistré");
+  } catch (e) { toast(e.message); }
+}
+async function deleteContext() {
+  const id = $("#c-ctx").value; if (!id) return;
+  if (!confirm("Supprimer ce contexte ?")) return;
+  try { await api.del(`/api/contexts/${id}`); contexts = await api.get("/api/contexts"); renderContexts(""); }
+  catch (e) { toast(e.message); }
 }
 
+/* ---------- Génération ---------- */
 async function generate() {
   const idea = $("#c-idea").value.trim();
   if (!idea) return toast("Saisissez une idée");
-  const docs = [...selected].map((id) => lib.find((d) => String(d.id) === id)).filter(Boolean);
-  const ctx = contexts.find((c) => String(c.id) === $("#c-ctx").value);
-  const resumes = docs.length
-    ? docs.map((d, i) => `- Document ${i + 1}, « ${d.name} » : résumé fidèle en 1 à 2 phrases.`).join("\n")
-    : "- Aucun document joint.";
-  const multi = docs.length > 1 ? "\n- Cite le document concerné (Document 1, 2…) pour chaque point.\n- Signale les contradictions entre documents." : "";
-  const prompt = `## Contexte\n${ctx ? ctx.text + "\n" : ""}${resumes}\n\n## Tâche\n${idea}\n\n## Contraintes\n- Reste factuel et concis.${multi}\n\n## Format\nRéponse courte, liste à puces si utile.`;
-  $("#c-go").disabled = true; $("#c-out").hidden = false; $("#c-out").textContent = ""; $("#c-actions").hidden = true;
-  const t0 = performance.now(); $("#c-info").textContent = "Génération par prompteur-claude…";
-  await fakeStream(prompt, (c) => ($("#c-out").textContent += c), 18);
-  $("#c-info").textContent = `Terminé en ${((performance.now() - t0) / 1000).toFixed(1)} s`;
-  $("#c-tok").textContent = `≈ ${tokens(prompt)} tokens`;
-  $("#c-actions").hidden = false; $("#c-go").disabled = false;
-  try { sessionStorage.setItem("last-prompt", prompt); } catch (e) {}
+  const body = { idea, doc_ids: [...selected].map(Number), context_id: $("#c-ctx").value ? +$("#c-ctx").value : null, attach: $("#c-attach").checked };
+  const out = $("#c-out");
+  $("#c-go").disabled = true; out.hidden = false; out.textContent = ""; $("#c-actions").hidden = true;
+  const t0 = performance.now(); $("#c-info").textContent = "Rédaction par prompteur-claude…";
+  try {
+    await streamNdjson("/api/generate", body, (m) => {
+      if (m.error) throw new Error(m.error);
+      if (m.t) { out.textContent += m.t; out.scrollTop = out.scrollHeight; }
+      if (m.done) {
+        lastPrompt = m.prompt; out.textContent = m.prompt;
+        $("#c-info").textContent = `Terminé en ${m.duration_s.toFixed(1)} s`;
+        $("#c-tok").textContent = `${m.tokens_before.toLocaleString("fr-FR")} → ${m.tokens_after.toLocaleString("fr-FR")} tokens`;
+        $("#c-actions").hidden = false;
+        try { sessionStorage.setItem("last-prompt", m.prompt); } catch (e) {}
+      }
+    });
+  } catch (e) {
+    $("#c-info").innerHTML = `<span class="status err">${esc(e.message)}</span>`;
+  } finally {
+    $("#c-go").disabled = false; renderSelection();
+    if ($("#c-info").textContent.startsWith("Rédaction")) $("#c-info").textContent = `Arrêté après ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+  }
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
   $("#formats").innerHTML = FAMILIES.map((f) => `<tr><td>${f.fam}</td><td class="mono">${f.ext.join(", ").toUpperCase()}</td><td>${f.tool}</td></tr>`).join("");
-  [lib, contexts] = await Promise.all([api.get("/api/library"), api.get("/api/contexts")]);
-  $("#c-ctx").innerHTML = `<option value="">Aucun</option>` + contexts.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
-  renderLib();
+  for (const [k, v] of Object.entries(TEMPLATES)) {
+    const b = Object.assign(document.createElement("button"), { className: "btn", textContent: k });
+    b.style.cssText = "padding:3px 10px; font-size:13px";
+    b.onclick = () => { $("#c-idea").value = v; $("#c-idea").focus(); };
+    $("#tpl").appendChild(b);
+  }
+  try { if (localStorage.getItem("attach") === "0") $("#c-attach").checked = false; } catch (e) {}
+  $("#c-attach").addEventListener("change", () => { try { localStorage.setItem("attach", $("#c-attach").checked ? "1" : "0"); } catch (e) {} });
+
+  try { contexts = await api.get("/api/contexts"); } catch (e) { contexts = []; }
+  let savedCtx = ""; try { savedCtx = localStorage.getItem("ctx-id") || ""; } catch (e) {}
+  renderContexts(savedCtx);
+  await loadLib();
 
   const drop = $("#drop");
   drop.addEventListener("click", () => $("#file").click());
@@ -254,8 +358,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
   drop.addEventListener("drop", (e) => addFiles(e.dataTransfer.files));
+  $("#url-go").addEventListener("click", addUrl);
+  $("#url").addEventListener("keydown", (e) => { if (e.key === "Enter") addUrl(); });
 
-  $("#lib").addEventListener("click", (e) => { if (e.target.matches(".pick")) return; const tr = e.target.closest("tr[data-id]"); if (tr) showPreview(lib.find((d) => String(d.id) === tr.dataset.id)); });
+  $("#lib").addEventListener("click", (e) => { if (e.target.matches(".pick")) return; const tr = e.target.closest("tr[data-id]"); if (tr) showPreview(tr.dataset.id); });
   ["input", "change"].forEach((ev) => { $("#search").addEventListener(ev, renderLib); $("#tag-filter").addEventListener(ev, renderLib); $("#date-filter").addEventListener(ev, renderLib); });
   $("#lib").addEventListener("change", (e) => { if (e.target.matches(".pick")) toggleDoc(e.target.dataset.id, e.target.checked); });
   $("#sel-all").addEventListener("change", (e) => {
@@ -264,8 +370,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   });
   $("#c-add").addEventListener("change", (e) => { if (e.target.value) toggleDoc(e.target.value, true); });
   $("#c-docs").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (b) toggleDoc(b.dataset.rm, false); });
+  $("#c-ctx").addEventListener("change", fillContext);
+  $("#ctx-save").addEventListener("click", saveContext);
+  $("#ctx-new").addEventListener("click", () => { $("#c-ctx").value = ""; fillContext(); $("#ctx-name").focus(); });
+  $("#ctx-del").addEventListener("click", deleteContext);
   $("#c-go").addEventListener("click", generate);
-  $("#c-copy").addEventListener("click", () => copy($("#c-out").textContent));
+  $("#c-idea").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) generate(); });
+  $("#c-copy").addEventListener("click", () => copy(lastPrompt || $("#c-out").textContent));
+  $("#c-dl").addEventListener("click", () => download("prompt.md", lastPrompt || $("#c-out").textContent));
 });
 </script>
 </body>
