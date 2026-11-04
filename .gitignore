@@ -1,0 +1,14 @@
+# Données locales (base SQLite, historique, bibliothèque)
+data/
+*.db
+
+# Sauvegardes et exports
+*.bak
+*.tar
+
+# Secrets (clé API, etc.)
+.env
+
+# Python
+__pycache__/
+*.pyc
