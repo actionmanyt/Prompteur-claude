@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Conversion des fichiers et des pages web en Markdown allégé, puis découpage en sections."""
 import email
 import os

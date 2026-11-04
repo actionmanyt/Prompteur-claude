@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Réglages, base SQLite, mots de passe, chiffrement et appel à Ollama."""
 import base64
 import hashlib

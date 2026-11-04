@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Bibliothèque de documents (envoi, conversion en tâche de fond) et contextes enregistrés."""
 import json
 import os

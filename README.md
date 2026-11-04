@@ -27,3 +27,7 @@ docker compose up -d --build md-converter
 ```
 
 Les données (`data/prompteur.db`) ne sont pas dans le dépôt : elles restent sur le serveur et sont incluses dans le script de sauvegarde.
+## Licence
+
+AGPL-3.0 : gratuit et libre. Toute version modifiée, distribuée ou mise en ligne,
+doit publier son code sous la même licence. Voir CONTRIBUTING.md pour proposer vos améliorations.

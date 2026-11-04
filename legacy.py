@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Ancienne page (avant la version 0.5), gardée sur /ancien le temps de valider la nouvelle.
 À supprimer quand la nouvelle page convient."""
 import json

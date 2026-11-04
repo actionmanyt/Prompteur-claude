@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Gestion des comptes, à lancer dans le conteneur :
 
     docker exec -it md-converter python manage.py users

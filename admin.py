@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Page Admin : GPU, modèles chargés, santé des services, export du jeu de données."""
 import json
 import os

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Génération du prompt par Ollama (streaming) et historique."""
 import json
 import re

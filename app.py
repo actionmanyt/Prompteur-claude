@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: AGPL-3.0-or-later
 """Prompteur Claude : point d'entrée FastAPI.
 
 Le même code tourne dans deux conteneurs :
