@@ -11,5 +11,6 @@ data/
 
 # Python
 __pycache__/
-*.pycpublic/
+*.pyc
+public/
 .hugo_build.lock
