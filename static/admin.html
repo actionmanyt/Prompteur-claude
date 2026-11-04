@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Admin · Prompteur Claude</title>
+<meta name="robots" content="noindex">
 <meta name="theme-color" content="#0b2420">
 <link rel="stylesheet" href="style.css">
 <script src="common.js"></script>
@@ -11,11 +12,10 @@
 <body>
 <header>
   <nav class="nav">
-    <div class="logo"><a href="index.html">Prompteur Claude</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
+    <div class="logo"><a href="admin.html">Prompteur Claude · Admin</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
     <ul id="menu">
-      <li><a href="admin.html">Admin</a></li>
-      <li><a href="index.html">Utilisation</a></li>
-      <li><a href="chat.html">Tchat Claude</a></li>
+      <li><a href="admin.html">Tableau de bord</a></li>
+      <li><a href="#" id="open-site" target="_blank" rel="noopener">Ouvrir le Prompteur ↗</a></li>
     </ul>
   </nav>
 </header>
@@ -219,6 +219,8 @@ async function exportDataset() {
 }
 
 document.addEventListener("DOMContentLoaded", async () => {
+  // Le site du Prompteur : même machine, port 8093
+  $("#open-site").href = `${location.protocol}//${location.hostname}:8093/`;
   $("#every").textContent = REFRESH / 1000;
   $("#history").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openDetail(+tr.dataset.id); });
   $("#filter").addEventListener("input", renderHistory);

@@ -1,28 +1,29 @@
 # Modifier et maintenir le Prompteur Claude
 
-*Version 0.5.0 (04/11/2026) : vraies données, connexion, tchat Claude.*
+*Version 0.6.0 (04/11/2026) : vraies données, connexion, tchat Claude, tableau de bord sur sa propre adresse.*
 
 ## Où sont les choses
 
 | Élément | Emplacement |
 |---|---|
 | Code (serveur) | `/mnt/ssd/apps/md-converter/`, relié au dépôt GitHub `actionmanyt/Prompteur-claude` |
-| Code (PC) | `C:\Users\arthur.lejosne\Documents\Perso\Test\prompteur-claude\` |
+| Code (PC) | `C:\Users\arthu\Documents\prompteur-claude\` |
 | Données | `/mnt/ssd/apps/md-converter/data/` : `prompteur.db`, sauvegardes `prompteur.db.bak-*`, `tmp/` |
 | Secrets | `/mnt/ssd/apps/md-converter/.env` (jamais dans Git) |
-| Page | `http://100.101.4.16:8093/` (ancienne page : `/ancien`) |
+| Site du Prompteur | `http://100.101.4.16:8093/` (Utilisation, Tchat ; ancienne page : `/ancien`), conteneur `md-converter` |
+| Tableau de bord | `http://100.101.4.16:8094/` (comptes admin uniquement), conteneur `md-admin` |
 
 ## Fichiers du code
 
 | Fichier | Rôle |
 |---|---|
-| `app.py` | Démarrage, contrôle de connexion sur toutes les pages, montage de `static/` |
+| `app.py` | Démarrage, contrôle de connexion, séparation site (`APP_MODE=user`) / tableau de bord (`APP_MODE=admin`) |
 | `core.py` | Réglages, base SQLite, mots de passe, chiffrement, appels Ollama |
 | `auth.py` | `/api/login`, `/api/logout`, `/api/me` |
 | `convert.py` | Conversion des fichiers et pages web en Markdown, découpage en sections |
 | `library.py` | `/api/library` (envoi, conversion en tâche de fond), `/api/contexts` |
 | `prompts.py` | `/api/generate` (streaming), `/api/history` |
-| `admin.py` | `/api/admin/gpu`, `/ps`, `/health`, `/dataset.jsonl` (réservé à l'admin) |
+| `admin.py` | `/api/admin/system`, `/gpu`, `/ps`, `/health`, `/dataset.jsonl` (uniquement sur le port 8094) |
 | `chat.py` | `/api/chat`, réglages et compteur de coût par compte |
 | `legacy.py` | Ancienne page sur `/ancien`, à supprimer quand la nouvelle convient |
 | `manage.py` | Comptes en ligne de commande |
@@ -37,12 +38,21 @@
 
 `deploy.sh` sauvegarde la base avant tout (7 dernières copies gardées).
 
+## Deux adresses
+
+Le même code tourne dans deux conteneurs qui partagent la base `data/prompteur.db` :
+
+- **`md-converter` (8093)** : Utilisation et Tchat. Il ne contient pas l'Admin : `/admin.html` et `/api/admin/…` y répondent « introuvable », même pour un admin.
+- **`md-admin` (8094)** : le tableau de bord, refusé à tout compte non admin. C'est lui qui reçoit le GPU (lecture de `nvidia-smi`).
+
+La connexion est partagée entre les deux adresses (même machine) : se déconnecter sur l'une déconnecte de l'autre.
+
 ## Comptes (serveur)
 
 ```bash
 docker exec -it md-converter python manage.py users
 docker exec -it md-converter python manage.py adduser marie          # simple utilisateur
-docker exec -it md-converter python manage.py adduser paul --admin   # accès à la page Admin
+docker exec -it md-converter python manage.py adduser paul --admin   # accès au tableau de bord (8094)
 docker exec -it md-converter python manage.py passwd marie
 docker exec -it md-converter python manage.py deluser marie
 ```
@@ -59,9 +69,10 @@ Les identifiants des modèles (`claude-haiku-5-5`, `claude-sonnet-5-5`) peuvent 
 
 | Problème | Vérification |
 |---|---|
-| La page ne s'ouvre pas | `docker ps --filter name=md-converter`, puis `docker logs md-converter --tail 50` |
+| Le site ne s'ouvre pas | `docker ps --filter name=md-converter`, puis `docker logs md-converter --tail 50` |
+| Le tableau de bord ne s'ouvre pas | `docker logs md-admin --tail 50` ; un compte non admin est renvoyé à la connexion |
 | Impossible de se connecter | `docker exec -it md-converter python manage.py users`, puis `passwd` |
-| « GPU injoignable » dans l'Admin | Le bloc `deploy:` du `docker-compose.yml` donne le GPU au conteneur ; vérifier `docker exec md-converter nvidia-smi` |
+| « Aucune carte NVIDIA détectée » | Le bloc `deploy:` du service `md-admin` donne le GPU au conteneur ; vérifier `docker exec md-admin nvidia-smi` |
 | « Prompteur injoignable » | `docker exec md-converter python -c "import urllib.request;print(urllib.request.urlopen('http://ia-ollama-1:11434/api/version').read())"` |
 | Document « erreur » | Survol du statut pour le détail ; un redémarrage pendant une conversion demande de renvoyer le fichier |
 | Revenir en arrière | `git log --oneline`, `git checkout <commit> -- .`, `./deploy.sh` ; base : copier un `data/prompteur.db.bak-*` sur `prompteur.db` conteneur arrêté |

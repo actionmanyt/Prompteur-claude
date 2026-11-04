@@ -13,7 +13,6 @@
   <nav class="nav">
     <div class="logo"><a href="index.html">Prompteur Claude</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
     <ul id="menu">
-      <li><a href="admin.html">Admin</a></li>
       <li><a href="index.html">Utilisation</a></li>
       <li><a href="chat.html">Tchat Claude</a></li>
     </ul>
@@ -82,6 +81,9 @@
 
 <script>
 let thread = [], month = { cost: 0, tokens: 0 };
+const THREAD_KEY = "prompteur-thread";
+const saveThread = () => { try { sessionStorage.setItem(THREAD_KEY, JSON.stringify(thread)); } catch (e) {} };
+try { thread = JSON.parse(sessionStorage.getItem(THREAD_KEY) || "[]"); } catch (e) { thread = []; }
 
 const price = (m) => m === "sonnet"
   ? { in: +$("#p-s-in").value, out: +$("#p-s-out").value }
@@ -139,7 +141,7 @@ async function send() {
     bot.text = bot.text || `[${e.message}]`; bot.error = !bot.text.trim() || bot.text.startsWith("[");
     if (/Plafond/.test(e.message)) toast(e.message);
   }
-  renderThread(); $("#send").disabled = false;
+  renderThread(); saveThread(); $("#send").disabled = false;
 }
 
 async function loadSettings() {
@@ -173,10 +175,11 @@ async function saveSettings(deleteKey = false) {
 document.addEventListener("DOMContentLoaded", async () => {
   try { const p = sessionStorage.getItem("last-prompt"); if (p) { $("#msg").value = p; sessionStorage.removeItem("last-prompt"); } } catch (e) {}
   await loadSettings();
+  renderThread();
   $("#msg").addEventListener("input", estimate); $("#model").addEventListener("change", estimate);
   $("#send").addEventListener("click", send);
   $("#msg").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send(); });
-  $("#clear").addEventListener("click", () => { thread = []; renderThread(); estimate(); });
+  $("#clear").addEventListener("click", () => { thread = []; saveThread(); renderThread(); estimate(); });
   $("#cap").addEventListener("input", () => renderCost());
   $("#save").addEventListener("click", () => saveSettings(false));
   $("#key-del").addEventListener("click", () => { if (confirm("Supprimer votre clé API du serveur ?")) saveSettings(true); });

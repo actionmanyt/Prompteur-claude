@@ -10,7 +10,7 @@ import urllib.request
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse, Response
 
-from core import APP_VERSION, DB_PATH, GIT_COMMIT, OLLAMA_URL, PROMPT_MODEL, STARTED, db, ollama_json
+from core import APP_VERSION, DB_PATH, GIT_COMMIT, OLLAMA_URL, PROMPT_MODEL, SITE_URL, STARTED, db, ollama_json
 from library import kept_text
 from prompts import history_rows
 
@@ -111,7 +111,9 @@ def ping(url: str) -> tuple[str, str]:
 
 @router.get("/health")
 def health():
-    services = [{"name": "md-converter", "state": "Up", "detail": "Up depuis " + duration(time.time() - STARTED)}]
+    services = [{"name": "md-admin (ce tableau de bord)", "state": "Up", "detail": "Up depuis " + duration(time.time() - STARTED)}]
+    state, detail = ping(SITE_URL.rstrip("/") + "/login.html")
+    services.append({"name": "md-converter (site du Prompteur)", "state": state, "detail": detail})
     try:
         v = ollama_json("/api/version")
         services.append({"name": "ollama", "state": "Up", "detail": f"version {v.get('version', '?')} · {OLLAMA_URL}"})

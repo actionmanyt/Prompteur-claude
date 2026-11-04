@@ -1,9 +1,13 @@
+# Deux conteneurs, même image, même base (dossier data/) :
+# - md-converter : le site du Prompteur (Utilisation, Tchat), http://<serveur>:8093
+# - md-admin     : le tableau de bord, sur sa propre adresse, http://<serveur>:8094
 services:
   md-converter:
     build:
       context: .
       args:
         GIT_COMMIT: ${GIT_COMMIT:-inconnu}
+    image: prompteur-claude:local
     container_name: md-converter
     restart: unless-stopped
     ports:
@@ -11,13 +15,36 @@ services:
     env_file:
       - .env
     environment:
+      - APP_MODE=user
       - OLLAMA_URL=http://ia-ollama-1:11434
       - PROMPT_MODEL=prompteur-claude
       - FALLBACK_MODEL=qwen3:4b-instruct
+    volumes:
+      - ./data:/data
+    networks:
+      - default
+      - ia
+
+  md-admin:
+    image: prompteur-claude:local
+    pull_policy: never
+    container_name: md-admin
+    restart: unless-stopped
+    depends_on:
+      - md-converter
+    ports:
+      - "8094:8000"
+    env_file:
+      - .env
+    environment:
+      - APP_MODE=admin
+      - OLLAMA_URL=http://ia-ollama-1:11434
+      - PROMPT_MODEL=prompteur-claude
+      - SITE_URL=http://md-converter:8000
       - SERVER_NAME=${SERVER_NAME:-}
     volumes:
       - ./data:/data
-    # GPU donné au conteneur uniquement pour lire nvidia-smi (page Admin), presque sans VRAM
+    # GPU donné au tableau de bord uniquement pour lire nvidia-smi, presque sans VRAM
     deploy:
       resources:
         reservations:
@@ -28,6 +55,7 @@ services:
     networks:
       - default
       - ia
+
 networks:
   ia:
     external: true

@@ -26,6 +26,8 @@ GIT_COMMIT=$(git rev-parse --short HEAD) SERVER_NAME=$(hostname) docker compose 
 
 # 4. Vérifications
 sleep 5
-docker ps --filter name=md-converter --format 'Conteneur : {{.Names}} {{.Status}}'
-curl -fsS -o /dev/null -w "Page de connexion : HTTP %{http_code}\n" http://localhost:8093/login.html \
-  || { echo "La page ne répond pas : docker logs md-converter --tail 50" >&2; exit 1; }
+docker ps --filter name=md-converter --filter name=md-admin --format 'Conteneur : {{.Names}} {{.Status}}'
+curl -fsS -o /dev/null -w "Site du Prompteur (8093) : HTTP %{http_code}\n" http://localhost:8093/login.html \
+  || { echo "Le site ne répond pas : docker logs md-converter --tail 50" >&2; exit 1; }
+curl -fsS -o /dev/null -w "Tableau de bord (8094)   : HTTP %{http_code}\n" http://localhost:8094/login.html \
+  || { echo "Le tableau de bord ne répond pas : docker logs md-admin --tail 50" >&2; exit 1; }

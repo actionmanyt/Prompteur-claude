@@ -13,7 +13,6 @@
   <nav class="nav">
     <div class="logo"><a href="index.html">Prompteur Claude</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
     <ul id="menu">
-      <li><a href="admin.html">Admin</a></li>
       <li><a href="index.html">Utilisation</a></li>
       <li><a href="chat.html">Tchat Claude</a></li>
     </ul>
@@ -99,6 +98,7 @@
     <textarea id="c-idea" placeholder="Ex. : dis-moi si ce devis est un bon choix pour mon serveur"></textarea>
     <div class="row" style="margin-top:12px">
       <button class="btn primary" id="c-go">Générer le prompt</button>
+      <button class="btn" id="c-reset" title="Vider l'idée, les documents choisis et le prompt">Nouveau prompt</button>
       <span class="muted" id="c-info"></span>
     </div>
     <pre class="prompt" id="c-out" hidden></pre>
@@ -197,11 +197,40 @@ async function addUrl() {
   catch (e) { toast(e.message); }
 }
 
+/* ---------- Mémoire de la page (idée, documents choisis, dernier prompt) ---------- */
+const STATE_KEY = "prompteur-compose";
+function saveState() {
+  try {
+    localStorage.setItem(STATE_KEY, JSON.stringify({
+      idea: $("#c-idea").value, selected: [...selected], prompt: lastPrompt, tok: $("#c-tok").textContent }));
+  } catch (e) {}
+}
+function restoreState() {
+  let st = null;
+  try { st = JSON.parse(localStorage.getItem(STATE_KEY) || "null"); } catch (e) {}
+  if (!st) return;
+  $("#c-idea").value = st.idea || "";
+  (st.selected || []).forEach((id) => { const d = byId(id); if (d && d.status === "prêt") selected.add(String(id)); });
+  if (st.prompt) {
+    lastPrompt = st.prompt;
+    $("#c-out").hidden = false; $("#c-out").textContent = st.prompt;
+    $("#c-actions").hidden = false; $("#c-tok").textContent = st.tok || "";
+    $("#c-info").textContent = "Dernier prompt généré";
+  }
+  renderLib();
+}
+function resetCompose() {
+  selected.clear(); lastPrompt = ""; $("#c-idea").value = "";
+  $("#c-out").hidden = true; $("#c-out").textContent = ""; $("#c-actions").hidden = true; $("#c-info").textContent = "";
+  try { localStorage.removeItem(STATE_KEY); } catch (e) {}
+  renderLib();
+}
+
 /* ---------- Sélection de plusieurs documents ---------- */
 function toggleDoc(id, on) {
   id = String(id);
   on ? selected.add(id) : selected.delete(id);
-  renderLib();
+  renderLib(); saveState();
 }
 
 function renderSelection() {
@@ -326,6 +355,7 @@ async function generate() {
         $("#c-tok").textContent = `${m.tokens_before.toLocaleString("fr-FR")} → ${m.tokens_after.toLocaleString("fr-FR")} tokens`;
         $("#c-actions").hidden = false;
         try { sessionStorage.setItem("last-prompt", m.prompt); } catch (e) {}
+        saveState();
       }
     });
   } catch (e) {
@@ -341,7 +371,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   for (const [k, v] of Object.entries(TEMPLATES)) {
     const b = Object.assign(document.createElement("button"), { className: "btn", textContent: k });
     b.style.cssText = "padding:3px 10px; font-size:13px";
-    b.onclick = () => { $("#c-idea").value = v; $("#c-idea").focus(); };
+    b.onclick = () => { $("#c-idea").value = v; $("#c-idea").focus(); saveState(); };
     $("#tpl").appendChild(b);
   }
   try { if (localStorage.getItem("attach") === "0") $("#c-attach").checked = false; } catch (e) {}
@@ -351,6 +381,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   let savedCtx = ""; try { savedCtx = localStorage.getItem("ctx-id") || ""; } catch (e) {}
   renderContexts(savedCtx);
   await loadLib();
+  restoreState();
 
   const drop = $("#drop");
   drop.addEventListener("click", () => $("#file").click());
@@ -366,7 +397,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#lib").addEventListener("change", (e) => { if (e.target.matches(".pick")) toggleDoc(e.target.dataset.id, e.target.checked); });
   $("#sel-all").addEventListener("change", (e) => {
     lib.filter((d) => d.status === "prêt").forEach((d) => e.target.checked ? selected.add(String(d.id)) : selected.delete(String(d.id)));
-    renderLib();
+    renderLib(); saveState();
   });
   $("#c-add").addEventListener("change", (e) => { if (e.target.value) toggleDoc(e.target.value, true); });
   $("#c-docs").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (b) toggleDoc(b.dataset.rm, false); });
@@ -375,6 +406,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#ctx-new").addEventListener("click", () => { $("#c-ctx").value = ""; fillContext(); $("#ctx-name").focus(); });
   $("#ctx-del").addEventListener("click", deleteContext);
   $("#c-go").addEventListener("click", generate);
+  $("#c-reset").addEventListener("click", resetCompose);
+  $("#c-idea").addEventListener("input", saveState);
   $("#c-idea").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) generate(); });
   $("#c-copy").addEventListener("click", () => copy(lastPrompt || $("#c-out").textContent));
   $("#c-dl").addEventListener("click", () => download("prompt.md", lastPrompt || $("#c-out").textContent));

@@ -35,6 +35,20 @@
 <footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
 
 <script>
+(async () => {
+  try {
+    const site = await api.get("/api/site");
+    if (site.mode === "admin") {
+      document.title = "Connexion · Admin · Prompteur Claude";
+      $("h1").textContent = "Administration";
+      $(".page-header p").textContent = "Tableau de bord réservé aux comptes administrateurs.";
+    }
+  } catch (e) {}
+  if (new URLSearchParams(location.search).has("refus")) {
+    $("#err").textContent = "Ce compte n'a pas accès à l'administration : connectez-vous avec un compte admin.";
+    $("#err").hidden = false;
+  }
+})();
 $("#form").addEventListener("submit", async (e) => {
   e.preventDefault();
   $("#go").disabled = true; $("#err").hidden = true;

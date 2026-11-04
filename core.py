@@ -21,7 +21,10 @@ FALLBACK_MODEL = os.environ.get("FALLBACK_MODEL", "qwen3:4b-instruct")
 NUM_CTX = int(os.environ.get("NUM_CTX", "8192"))
 RESERVE = 1200  # place gardée pour l'idée, le contexte et la consigne du Modelfile
 DOC_BUDGET = NUM_CTX - RESERVE  # 6992 tokens de documents au maximum
-APP_VERSION = "0.5.1"
+APP_VERSION = "0.6.0"
+# « user » : site du Prompteur (8093) · « admin » : tableau de bord, sur sa propre adresse (8094)
+APP_MODE = os.environ.get("APP_MODE", "user").strip().lower()
+SITE_URL = os.environ.get("SITE_URL", "http://md-converter:8000")  # site vu depuis le conteneur admin
 GIT_COMMIT = os.environ.get("GIT_COMMIT", "inconnu")
 STARTED = time.time()
 CONTEXT_FILE = os.environ.get("CONTEXT_FILE", os.path.join(DATA_DIR, "context.md"))
@@ -167,11 +170,24 @@ def ndjson(obj: dict) -> str:
 
 # ---------- Démarrage ----------
 def init_db():
+    """Lancé par les deux conteneurs (site et admin) : chaque étape supporte d'être faite deux fois."""
     os.makedirs(TMP_DIR, exist_ok=True)
+    # Les deux conteneurs démarrent en même temps : si la base est occupée, on réessaie
+    for attempt in range(30):
+        try:
+            with db() as con:
+                if APP_MODE != "admin":
+                    con.execute("PRAGMA journal_mode=WAL")
+                con.executescript(SCHEMA)
+            break
+        except sqlite3.OperationalError as e:
+            if "locked" not in str(e) or attempt == 29:
+                raise
+            time.sleep(1)
+    if APP_MODE == "admin":
+        return
     with db() as con:
-        con.execute("PRAGMA journal_mode=WAL")
-        con.executescript(SCHEMA)
-        # Conversions coupées par un redémarrage du conteneur
+        # Conversions coupées par un redémarrage du conteneur (seul le site convertit)
         con.execute("UPDATE documents SET status='erreur', error='Conversion interrompue (redémarrage) : renvoyez le fichier.' "
                     "WHERE status='en cours'")
         con.execute("DELETE FROM sessions WHERE expires < ?", (time.time(),))
@@ -189,8 +205,11 @@ def init_db():
         user = os.environ.get("ADMIN_USER", "").strip()
         pw = os.environ.get("ADMIN_PASSWORD", "")
         if user and pw:
-            create_user(user, pw, is_admin=True)
-            print(f"[prompteur] Compte admin « {user} » créé.", flush=True)
+            try:
+                create_user(user, pw, is_admin=True)
+                print(f"[prompteur] Compte admin « {user} » créé.", flush=True)
+            except sqlite3.IntegrityError:
+                pass  # déjà créé
         else:
             print("[prompteur] Aucun compte : renseignez ADMIN_USER et ADMIN_PASSWORD dans .env, "
                   "ou lancez « python manage.py adduser <nom> --admin ».", flush=True)
