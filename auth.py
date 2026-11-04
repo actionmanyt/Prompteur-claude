@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Connexion par identifiant et mot de passe (cookie de session)."""
+"""Connexion par identifiant et mot de passe (cookie de session), changement de son mot de passe."""
 import secrets
 import time
 
@@ -7,7 +7,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from core import check_pw, db, hash_pw
+from core import check_pw, db, hash_pw, password_problem
 
 COOKIE = "prompteur_session"
 SESSION_DAYS = 30
@@ -20,7 +20,7 @@ def user_from_token(token: str | None):
         return None
     with db() as con:
         r = con.execute(
-            "SELECT u.id, u.username, u.is_admin FROM sessions s JOIN users u ON u.id = s.user_id "
+            "SELECT u.id, u.username, u.is_admin, u.must_change FROM sessions s JOIN users u ON u.id = s.user_id "
             "WHERE s.token = ? AND s.expires > ?", (token, time.time())).fetchone()
     return dict(r) if r else None
 
@@ -64,7 +64,7 @@ def logout(request: Request):
 @router.get("/me")
 def me(request: Request):
     u = request.state.user
-    return {"username": u["username"], "is_admin": bool(u["is_admin"])}
+    return {"username": u["username"], "is_admin": bool(u["is_admin"]), "must_change": bool(u["must_change"])}
 
 
 class NewPassword(BaseModel):
@@ -74,12 +74,18 @@ class NewPassword(BaseModel):
 
 @router.post("/me/password")
 def change_password(body: NewPassword, request: Request):
+    """Change son propre mot de passe ; les autres sessions du compte sont fermées."""
     u = request.state.user
-    if len(body.new) < 8:
-        return JSONResponse({"error": "8 caractères minimum."}, 400)
+    problem = password_problem(body.new)
+    if problem:
+        return JSONResponse({"error": problem}, 400)
+    if body.new == body.old:
+        return JSONResponse({"error": "Le nouveau mot de passe doit être différent de l'ancien."}, 400)
     with db() as con:
         r = con.execute("SELECT pw_hash FROM users WHERE id = ?", (u["id"],)).fetchone()
         if not check_pw(body.old, r["pw_hash"]):
             return JSONResponse({"error": "Ancien mot de passe incorrect."}, 400)
-        con.execute("UPDATE users SET pw_hash = ? WHERE id = ?", (hash_pw(body.new), u["id"]))
+        con.execute("UPDATE users SET pw_hash = ?, must_change = 0 WHERE id = ?", (hash_pw(body.new), u["id"]))
+        con.execute("DELETE FROM sessions WHERE user_id = ? AND token != ?",
+                    (u["id"], request.cookies.get(COOKIE, "")))
     return {"ok": True}

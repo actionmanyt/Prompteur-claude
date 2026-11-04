@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, PlainTextResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
+import accounts
 import admin
 import auth
 import chat
@@ -22,6 +23,8 @@ ADMIN_SITE = APP_MODE == "admin"
 app = FastAPI(title="Prompteur Claude", docs_url=None, redoc_url=None, openapi_url=None)
 
 PUBLIC = {"/login.html", "/style.css", "/common.js", "/api/login", "/api/logout", "/favicon.ico"}
+# Avec un mot de passe provisoire, seules ces routes répondent tant qu'il n'est pas changé
+MUST_CHANGE_OK = {"/api/me", "/api/me/password", "/api/logout", "/api/site"}
 USER_PAGES = {"/", "/index.html", "/chat.html", "/ancien"}
 
 
@@ -47,6 +50,8 @@ async def guard(request: Request, call_next):
             return RedirectResponse("/login.html?refus=1", 303)
         if path in USER_PAGES:
             return RedirectResponse("/admin.html", 303)
+    if user["must_change"] and path.startswith("/api/") and path not in MUST_CHANGE_OK:
+        return JSONResponse({"error": "Changez d'abord votre mot de passe provisoire.", "must_change": True}, 403)
     request.state.user = user
     return await call_next(request)
 
@@ -59,7 +64,7 @@ def site_info():
 PUBLIC.add("/api/site")
 
 routers = [auth.router, library.router, prompts.router, chat.router]
-routers += [admin.router] if ADMIN_SITE else [legacy.router]
+routers += [admin.router, accounts.router] if ADMIN_SITE else [legacy.router]
 for r in routers:
     app.include_router(r)
 

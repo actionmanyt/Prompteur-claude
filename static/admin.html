@@ -81,7 +81,61 @@
     </div>
     <pre class="prompt" id="export-preview" hidden></pre>
   </div>
+
+  <!-- 1.7 Comptes -->
+  <h2><span class="num">1.7</span>Comptes</h2>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>Identifiant</th><th>Rôle</th><th>Mot de passe</th><th class="num">Sessions</th><th>Créé le</th><th>Dernier prompt</th><th></th></tr></thead>
+      <tbody id="users"><tr><td colspan="7" class="muted">Chargement…</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:var(--content-gap)">
+    <h3 style="margin-top:0">Créer un compte</h3>
+    <form id="new-user" autocomplete="off">
+      <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap:12px">
+        <div><label for="nu-name" style="margin-top:0">Identifiant</label>
+          <input id="nu-name" required pattern="[A-Za-z0-9._\-]{2,32}" placeholder="marie" title="2 à 32 caractères : lettres, chiffres, . - _"></div>
+        <div><label for="nu-pw" style="margin-top:0">Mot de passe</label>
+          <div class="row" style="flex-wrap:nowrap"><input id="nu-pw" required minlength="8" autocomplete="new-password">
+          <button class="btn" type="button" id="nu-gen" title="Générer un mot de passe">Générer</button></div></div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <label style="margin:0; display:flex; gap:6px; align-items:center"><input type="checkbox" id="nu-temp" checked style="width:auto"> Provisoire (à changer à la première connexion)</label>
+        <label style="margin:0; display:flex; gap:6px; align-items:center"><input type="checkbox" id="nu-admin" style="width:auto"> Administrateur (accès au tableau de bord)</label>
+      </div>
+      <div class="row" style="margin-top:16px">
+        <button class="btn primary" type="submit" id="nu-save">Créer le compte</button>
+        <span class="muted" id="nu-meter"></span>
+      </div>
+    </form>
+    <div id="nu-done" hidden style="margin-top:16px">
+      <p style="margin:0 0 6px"><span class="status ok">Compte créé</span> À transmettre à l'utilisateur (ce mot de passe ne sera plus affiché) :</p>
+      <pre class="prompt" id="nu-info" style="margin:6px 0"></pre>
+      <button class="btn" type="button" id="nu-copy">Copier</button>
+    </div>
+  </div>
 </main>
+
+<!-- Nouveau mot de passe pour un compte -->
+<dialog id="reset" style="width:min(460px, calc(100vw - 32px))">
+  <h3 style="margin-top:0">Nouveau mot de passe pour <span id="r-name"></span></h3>
+  <form id="reset-form" autocomplete="off">
+    <label for="r-pw">Mot de passe</label>
+    <div class="row" style="flex-wrap:nowrap"><input id="r-pw" required minlength="8" autocomplete="new-password">
+      <button class="btn" type="button" id="r-gen">Générer</button></div>
+    <label style="display:flex; gap:6px; align-items:center"><input type="checkbox" id="r-temp" checked style="width:auto"> Provisoire (à changer à la prochaine connexion)</label>
+    <p class="muted" style="font-size:14px">Les sessions ouvertes de ce compte seront fermées.</p>
+    <p id="r-err" class="status err" hidden></p>
+    <div class="row">
+      <button class="btn primary" type="submit">Enregistrer</button>
+      <button class="btn" type="button" id="r-copy">Copier le mot de passe</button>
+      <span style="flex:1"></span>
+      <button class="btn" type="button" onclick="$('#reset').close()">Fermer</button>
+    </div>
+  </form>
+</dialog>
 
 <!-- 1.5 Détail d'un prompt -->
 <dialog id="detail">
@@ -218,16 +272,104 @@ async function exportDataset() {
   } catch (e) { toast("Export impossible : " + e.message); }
 }
 
+/* ---------- 1.7 Comptes ---------- */
+let users = [];
+const siteUrl = () => `${location.protocol}//${location.hostname}:8093/`;
+
+async function loadUsers() {
+  try { users = await api.get("/api/admin/users"); } catch (e) {
+    $("#users").innerHTML = `<tr><td colspan="7"><span class="status err">${esc(e.message)}</span></td></tr>`; return;
+  }
+  const me = ME || (await api.get("/api/me").catch(() => ({})));
+  $("#users").innerHTML = users.map((u) => {
+    const self = u.username === me.username;
+    return `<tr data-uid="${u.id}" style="cursor:default">
+      <td><strong>${esc(u.username)}</strong>${self ? ' <span class="tag">vous</span>' : ""}</td>
+      <td>${u.is_admin ? '<span class="status ok">admin</span>' : "utilisateur"}</td>
+      <td>${u.must_change ? '<span class="status warn">provisoire</span>' : '<span class="muted">choisi</span>'}</td>
+      <td class="num">${u.sessions}</td>
+      <td style="white-space:nowrap">${fmtDate(u.created)}</td>
+      <td style="white-space:nowrap">${u.last_prompt ? fmtDate(u.last_prompt) : '<span class="muted">jamais</span>'}</td>
+      <td style="white-space:nowrap">
+        <button class="btn" data-act="pw" title="Donner un nouveau mot de passe">Mot de passe</button>
+        ${self ? "" : `<button class="btn" data-act="role">${u.is_admin ? "Retirer admin" : "Rendre admin"}</button>`}
+        ${u.sessions && !self ? '<button class="btn" data-act="logout" title="Fermer ses sessions">Déconnecter</button>' : ""}
+        ${self ? "" : '<button class="btn" data-act="del" title="Supprimer le compte" style="color:var(--err)">Supprimer</button>'}
+      </td></tr>`;
+  }).join("") || `<tr><td colspan="7" class="muted">Aucun compte.</td></tr>`;
+}
+
+async function userAction(act, u) {
+  try {
+    if (act === "pw") return openReset(u);
+    if (act === "role") {
+      const to = !u.is_admin;
+      if (!confirm(to ? `Donner à « ${u.username} » l'accès au tableau de bord ?` : `Retirer les droits d'administrateur de « ${u.username} » ?`)) return;
+      await api.patch(`/api/admin/users/${u.id}`, { is_admin: to });
+      toast(to ? "Compte administrateur" : "Compte utilisateur");
+    }
+    if (act === "logout") { const r = await api.post(`/api/admin/users/${u.id}/logout`); toast(`${r.closed} session(s) fermée(s)`); }
+    if (act === "del") {
+      if (!confirm(`Supprimer le compte « ${u.username} » ?\nSa clé API et ses réglages seront effacés. L'historique de ses prompts est gardé.`)) return;
+      await api.del(`/api/admin/users/${u.id}`); toast("Compte supprimé");
+    }
+  } catch (e) { toast(e.message); }
+  loadUsers();
+}
+
+function openReset(u) {
+  $("#r-name").textContent = u.username; $("#r-pw").value = genPassword(); $("#r-temp").checked = true;
+  $("#r-err").hidden = true;
+  $("#reset-form").onsubmit = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api.post(`/api/admin/users/${u.id}/password`, { password: $("#r-pw").value, temporary: $("#r-temp").checked });
+      $("#reset").close();
+      if (r.self) { toast("Mot de passe changé : reconnectez-vous"); setTimeout(() => (location.href = "/login.html"), 1200); return; }
+      toast("Mot de passe changé, sessions fermées"); loadUsers();
+    } catch (ex) { $("#r-err").textContent = ex.message; $("#r-err").hidden = false; }
+  };
+  $("#reset").showModal();
+}
+
+function setupUsers() {
+  const meter = () => { const s = pwStrength($("#nu-pw").value); $("#nu-meter").innerHTML = $("#nu-pw").value ? `Solidité : <span class="status ${s.cls}">${s.label}</span>` : ""; };
+  $("#nu-pw").addEventListener("input", meter);
+  $("#nu-gen").addEventListener("click", () => { $("#nu-pw").value = genPassword(); meter(); });
+  $("#r-gen").addEventListener("click", () => ($("#r-pw").value = genPassword()));
+  $("#r-copy").addEventListener("click", () => copy($("#r-pw").value));
+  $("#nu-copy").addEventListener("click", () => copy($("#nu-info").textContent));
+  $("#users").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-act]"); if (!b) return;
+    const u = users.find((x) => x.id === +b.closest("tr").dataset.uid); if (u) userAction(b.dataset.act, u);
+  });
+  $("#new-user").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const name = $("#nu-name").value.trim(), pw = $("#nu-pw").value, temp = $("#nu-temp").checked;
+    $("#nu-save").disabled = true;
+    try {
+      await api.post("/api/admin/users", { username: name, password: pw, is_admin: $("#nu-admin").checked, temporary: temp });
+      $("#nu-info").textContent = `Adresse : ${siteUrl()}\nIdentifiant : ${name}\nMot de passe : ${pw}` +
+        (temp ? "\n(provisoire : à changer à la première connexion)" : "");
+      $("#nu-done").hidden = false;
+      $("#new-user").reset(); $("#nu-temp").checked = true; $("#nu-meter").textContent = "";
+      toast("Compte créé"); loadUsers();
+    } catch (ex) { toast(ex.message); }
+    finally { $("#nu-save").disabled = false; }
+  });
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
+  setupUsers();
   // Le site du Prompteur : même machine, port 8093
-  $("#open-site").href = `${location.protocol}//${location.hostname}:8093/`;
+  $("#open-site").href = siteUrl();
   $("#every").textContent = REFRESH / 1000;
   $("#history").addEventListener("click", (e) => { const tr = e.target.closest("tr[data-id]"); if (tr) openDetail(+tr.dataset.id); });
   $("#filter").addEventListener("input", renderHistory);
   $("#only-ideal").addEventListener("change", renderHistory);
   await loadHistory();
   await loadSystem();
-  loadGpu(); loadPs(); loadHealth();
+  loadGpu(); loadPs(); loadHealth(); loadUsers();
   setInterval(() => { loadGpu(); loadPs(); }, REFRESH);
   setInterval(loadHealth, 30000);
 });

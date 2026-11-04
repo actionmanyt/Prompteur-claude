@@ -7,7 +7,7 @@
 | Suite | Dossier | Ce qu'elle vérifie | Où la lancer |
 |---|---|---|---|
 | Unitaires | `tests/unit/` | Fonctions seules : tokens, mots de passe, chiffrement, allègement, sections, conversions, construction du message envoyé à Ollama | PC, GitHub Actions |
-| Intégration | `tests/integration/` | Toutes les routes `/api/…` avec une base SQLite neuve : connexion, séparation 8093 / 8094, bibliothèque, budget de 6 992 tokens, génération, historique, tchat (clé, plafond, secours), tableau de bord, `dataset.jsonl` | PC, GitHub Actions |
+| Intégration | `tests/integration/` | Toutes les routes `/api/…` avec une base SQLite neuve : connexion, comptes et mot de passe provisoire, séparation 8093 / 8094, bibliothèque, budget de 6 992 tokens, génération, historique, tchat (clé, plafond, secours), tableau de bord, `dataset.jsonl` | PC, GitHub Actions |
 | Live | `tests/live/` | L'installation réelle sur `srv` : pages, accès, santé des services, GPU, modèle `qwen3`, réactivité d'une vraie génération | PC (via Tailscale), après `./deploy.sh` |
 
 Les suites unitaires et d'intégration n'appellent **jamais** Ollama, l'API Claude ni `nvidia-smi` : des imitations les remplacent. Elles ne touchent pas au dossier `data/`.

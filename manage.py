@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
-"""Gestion des comptes, à lancer dans le conteneur :
+"""Gestion des comptes, à lancer dans le conteneur (le plus simple : la section Comptes du tableau de bord) :
 
     docker exec -it md-converter python manage.py users
     docker exec -it md-converter python manage.py adduser marie
@@ -10,14 +10,15 @@
 import getpass
 import sys
 
-from core import create_user, db, hash_pw, init_db
+from core import USERNAME_RE, create_user, db, hash_pw, init_db, password_problem
 
 
 def ask_password() -> str:
     while True:
         pw = getpass.getpass("Mot de passe (8 caractères minimum) : ")
-        if len(pw) < 8:
-            print("Trop court.")
+        problem = password_problem(pw)
+        if problem:
+            print(problem)
         elif pw != getpass.getpass("Encore une fois : "):
             print("Les deux mots de passe sont différents.")
         else:
@@ -32,8 +33,9 @@ def main(args: list[str]):
     cmd = args[0]
     if cmd == "users":
         with db() as con:
-            for r in con.execute("SELECT username, is_admin, created FROM users ORDER BY username"):
-                print(f"{r['username']:<20} {'admin' if r['is_admin'] else 'utilisateur':<12} {r['created']}")
+            for r in con.execute("SELECT username, is_admin, must_change, created FROM users ORDER BY username"):
+                pw = "provisoire" if r["must_change"] else ""
+                print(f"{r['username']:<20} {'admin' if r['is_admin'] else 'utilisateur':<12} {pw:<11} {r['created']}")
         return 0
     if len(args) < 2:
         print("Précisez le nom du compte.")
@@ -42,6 +44,9 @@ def main(args: list[str]):
     with db() as con:
         exists = con.execute("SELECT id FROM users WHERE username=?", (name,)).fetchone()
     if cmd == "adduser":
+        if not USERNAME_RE.match(name):
+            print("Identifiant : 2 à 32 caractères (lettres, chiffres, . - _).")
+            return 1
         if exists:
             print("Ce compte existe déjà.")
             return 1
@@ -52,7 +57,7 @@ def main(args: list[str]):
         return 1
     elif cmd == "passwd":
         with db() as con:
-            con.execute("UPDATE users SET pw_hash=? WHERE id=?", (hash_pw(ask_password()), exists["id"]))
+            con.execute("UPDATE users SET pw_hash=?, must_change=0 WHERE id=?", (hash_pw(ask_password()), exists["id"]))
             con.execute("DELETE FROM sessions WHERE user_id=?", (exists["id"],))
         print("Mot de passe changé (sessions ouvertes fermées).")
     elif cmd == "deluser":

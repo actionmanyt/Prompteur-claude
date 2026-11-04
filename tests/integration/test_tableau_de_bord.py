@@ -107,7 +107,7 @@ def _health(admin_site, admin, monkeypatch, tags, site_state=("Up", "répond (HT
 
 def test_sante_tout_va_bien(admin_site, admin, monkeypatch):
     r, s = _health(admin_site, admin, monkeypatch, ["prompteur-claude:latest", "qwen3:4b-instruct"])
-    assert r["version"] == "0.6.0" and r["git"] == "test"
+    assert r["version"] == admin_site.m.core.APP_VERSION and r["git"] == "test"
     assert all(x["state"] == "Up" for x in r["services"]), r["services"]
     assert "qwen3 · 4.0B · Q4_K_M" in s["modèle prompteur-claude"]["detail"]
 

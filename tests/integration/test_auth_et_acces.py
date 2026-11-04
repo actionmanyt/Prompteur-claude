@@ -33,7 +33,7 @@ def test_pied_de_page_lien_code_source(client):
 # ---------- Connexion ----------
 def test_connexion_et_profil(site):
     c = site.login()
-    assert c.get("/api/me").json() == {"username": ADMIN_USER, "is_admin": True}
+    assert c.get("/api/me").json() == {"username": ADMIN_USER, "is_admin": True, "must_change": False}
 
 
 def test_cookie_de_session_protege(site):
@@ -83,8 +83,19 @@ def test_changer_mot_de_passe(site):
     c = site.login(USER, USER_PASSWORD)
     assert c.post("/api/me/password", json={"old": USER_PASSWORD, "new": "court"}).status_code == 400
     assert c.post("/api/me/password", json={"old": "faux", "new": "nouveau-123"}).status_code == 400
+    assert c.post("/api/me/password", json={"old": USER_PASSWORD, "new": USER_PASSWORD}).status_code == 400
+    assert c.post("/api/me/password", json={"old": USER_PASSWORD, "new": " espace-123"}).status_code == 400
     assert c.post("/api/me/password", json={"old": USER_PASSWORD, "new": "nouveau-123"}).json() == {"ok": True}
     site.login(USER, "nouveau-123")
+    assert site.client().post("/api/login", json={"username": USER, "password": USER_PASSWORD}).status_code == 401
+
+
+def test_changer_mot_de_passe_ferme_les_autres_sessions(site):
+    site.add_user()
+    pc, tel = site.login(USER, USER_PASSWORD), site.login(USER, USER_PASSWORD)
+    pc.post("/api/me/password", json={"old": USER_PASSWORD, "new": "nouveau-123"})
+    assert pc.get("/api/me").status_code == 200, "la session en cours reste ouverte"
+    assert tel.get("/api/me").status_code == 401, "les autres sessions sont fermées"
 
 
 # ---------- Séparation des deux sites ----------

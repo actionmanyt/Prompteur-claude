@@ -134,6 +134,42 @@ def test_init_db_supprime_les_sessions_expirees(core):
         assert [r[0] for r in con.execute("SELECT token FROM sessions")] == ["neuf"]
 
 
+@pytest.mark.parametrize("pw, ok", [
+    ("12345678", True), ("1234567", False), (" avec-espace", False), ("x" * 257, False), ("x" * 256, True),
+])
+def test_regles_du_mot_de_passe(core, pw, ok):
+    assert (core.password_problem(pw) is None) == ok
+
+
+@pytest.mark.parametrize("name, ok", [
+    ("marie", True), ("paul.dupont", True), ("a_b-c", True), ("a", False), ("élodie", False),
+    ("avec espace", False), ("x" * 33, False),
+])
+def test_regles_de_l_identifiant(core, name, ok):
+    assert bool(core.USERNAME_RE.match(name)) == ok
+
+
+def test_migration_base_0_6(core):
+    """Une base créée par la 0.6 (sans must_change) est mise à jour au démarrage."""
+    with core.db() as con:
+        con.execute("CREATE TABLE users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, "
+                    "pw_hash TEXT NOT NULL, is_admin INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL)")
+        con.execute("INSERT INTO users(username, pw_hash, is_admin, created) VALUES ('ancien', ?, 1, 'x')",
+                    (core.hash_pw("ancien-pass-1"),))
+    core.init_db()
+    core.init_db()  # deux fois : les deux conteneurs démarrent ensemble
+    with core.db() as con:
+        r = con.execute("SELECT username, must_change FROM users").fetchone()
+    assert (r["username"], r["must_change"]) == ("ancien", 0)
+
+
+def test_compte_provisoire(core):
+    core.init_db()
+    core.create_user("marie", "provisoire-1", must_change=True)
+    with core.db() as con:
+        assert con.execute("SELECT must_change FROM users WHERE username='marie'").fetchone()[0] == 1
+
+
 def test_nom_utilisateur_unique(core):
     core.init_db()
     with pytest.raises(sqlite3.IntegrityError):

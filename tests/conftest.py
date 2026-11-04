@@ -21,8 +21,8 @@ import pytest
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-# Modules qui dépendent des variables d'environnement : rechargés à chaque test.
-# convert.py n'en dépend pas, il reste en cache (MarkItDown est long à charger).
+# Modules qui dépendent des variables d'environnement : rechargés à chaque test (ceux-ci, plus tout
+# nouveau fichier .py de la racine). convert.py n'en dépend pas, il reste en cache (MarkItDown est long).
 APP_MODULES = ["app", "admin", "auth", "chat", "legacy", "library", "prompts", "core"]
 
 ADMIN_USER, ADMIN_PASSWORD = "admin", "admin-pass-123"
@@ -49,8 +49,14 @@ def _set_env(monkeypatch, data_dir: Path, mode: str):
         monkeypatch.delenv(k, raising=False)
 
 
+def _app_module_names():
+    """Tous les modules de l'app (fichiers .py à la racine du dépôt), sauf convert.py."""
+    names = {p.stem for p in ROOT.glob("*.py")} - {"convert"}
+    return [n for n in APP_MODULES if n in names] + sorted(names - set(APP_MODULES))
+
+
 def _fresh_import(name: str):
-    for m in APP_MODULES:
+    for m in _app_module_names():
         sys.modules.pop(m, None)
     return importlib.import_module(name)
 
@@ -93,7 +99,7 @@ def _build_site(tmp_path, monkeypatch, mode):
     _set_env(monkeypatch, tmp_path, mode)
     monkeypatch.chdir(ROOT)  # StaticFiles(directory="static") est relatif
     app_mod = _fresh_import("app")
-    mods = types.SimpleNamespace(**{n: sys.modules[n] for n in APP_MODULES if n in sys.modules})
+    mods = types.SimpleNamespace(**{n: sys.modules[n] for n in _app_module_names() if n in sys.modules})
     mods.app = app_mod
     mods.convert = sys.modules["convert"]
     # Pas d'attente d'une seconde après un mauvais mot de passe

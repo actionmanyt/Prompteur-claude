@@ -1,6 +1,6 @@
 # Modifier et maintenir le Prompteur Claude
 
-*Version 0.6.0 (04/11/2026) : vraies données, connexion, tchat Claude, tableau de bord sur sa propre adresse.*
+*Version 0.7.0 (04/11/2026) : comptes gérés depuis le tableau de bord, mot de passe provisoire, « Changer mon mot de passe ».*
 
 ## Où sont les choses
 
@@ -19,14 +19,15 @@
 |---|---|
 | `app.py` | Démarrage, contrôle de connexion, séparation site (`APP_MODE=user`) / tableau de bord (`APP_MODE=admin`) |
 | `core.py` | Réglages, base SQLite, mots de passe, chiffrement, appels Ollama |
-| `auth.py` | `/api/login`, `/api/logout`, `/api/me` |
+| `auth.py` | `/api/login`, `/api/logout`, `/api/me`, `/api/me/password` (changer son mot de passe) |
+| `accounts.py` | `/api/admin/users` : créer, nouveau mot de passe, rôle, déconnecter, supprimer (uniquement sur le port 8094) |
 | `convert.py` | Conversion des fichiers et pages web en Markdown, découpage en sections |
 | `library.py` | `/api/library` (envoi, conversion en tâche de fond), `/api/contexts` |
 | `prompts.py` | `/api/generate` (streaming), `/api/history` |
 | `admin.py` | `/api/admin/system`, `/gpu`, `/ps`, `/health`, `/dataset.jsonl` (uniquement sur le port 8094) |
 | `chat.py` | `/api/chat`, réglages et compteur de coût par compte |
 | `legacy.py` | Ancienne page sur `/ancien`, à supprimer quand la nouvelle convient |
-| `manage.py` | Comptes en ligne de commande |
+| `manage.py` | Comptes en ligne de commande (secours, si le tableau de bord est inaccessible) |
 | `deploy.sh` | Sauvegarde de la base, `git pull`, reconstruction, vérification |
 
 ## Routine de modification
@@ -47,17 +48,29 @@ Le même code tourne dans deux conteneurs qui partagent la base `data/prompteur.
 
 La connexion est partagée entre les deux adresses (même machine) : se déconnecter sur l'une déconnecte de l'autre.
 
-## Comptes (serveur)
+## Comptes
+
+**Depuis le tableau de bord** (`http://100.101.4.16:8094/`, section **1.7 Comptes**) :
+
+- **Créer un compte** : identifiant (2 à 32 caractères : lettres, chiffres, `.` `-` `_`), mot de passe (8 caractères minimum, bouton « Générer »), case « Administrateur » pour donner l'accès au tableau de bord.
+- **Provisoire** (coché par défaut) : à sa première connexion, l'utilisateur doit choisir son propre mot de passe. Tant qu'il ne l'a pas fait, le serveur refuse toutes les autres routes.
+- Après la création, l'adresse, l'identifiant et le mot de passe s'affichent une seule fois, avec un bouton « Copier » pour les transmettre.
+- Par compte : **Mot de passe** (nouveau mot de passe, provisoire ou non ; ferme ses sessions), **Rendre admin / Retirer admin**, **Déconnecter** (ferme ses sessions), **Supprimer** (efface aussi sa clé API et ses réglages ; l'historique de ses prompts est gardé).
+- Protections : impossible de se supprimer soi-même, de retirer ses propres droits, ou de supprimer le dernier administrateur.
+
+**Pour chaque utilisateur** : lien **Mot de passe** dans le menu de toutes les pages. Le changement ferme ses autres sessions (téléphone, autre navigateur) et garde celle en cours.
+
+**En ligne de commande** (serveur, en secours) :
 
 ```bash
 docker exec -it md-converter python manage.py users
 docker exec -it md-converter python manage.py adduser marie          # simple utilisateur
 docker exec -it md-converter python manage.py adduser paul --admin   # accès au tableau de bord (8094)
-docker exec -it md-converter python manage.py passwd marie
+docker exec -it md-converter python manage.py passwd marie           # mot de passe définitif, sessions fermées
 docker exec -it md-converter python manage.py deluser marie
 ```
 
-Le premier compte admin est créé au premier démarrage à partir de `ADMIN_USER` et `ADMIN_PASSWORD` dans `.env`.
+Le premier compte admin est créé au premier démarrage à partir de `ADMIN_USER` et `ADMIN_PASSWORD` dans `.env`. La base d'une version précédente est mise à jour automatiquement au démarrage (colonne `must_change`).
 
 ## Clé API Claude
 
@@ -71,7 +84,8 @@ Les identifiants des modèles (`claude-haiku-5-5`, `claude-sonnet-5-5`) peuvent 
 |---|---|
 | Le site ne s'ouvre pas | `docker ps --filter name=md-converter`, puis `docker logs md-converter --tail 50` |
 | Le tableau de bord ne s'ouvre pas | `docker logs md-admin --tail 50` ; un compte non admin est renvoyé à la connexion |
-| Impossible de se connecter | `docker exec -it md-converter python manage.py users`, puis `passwd` |
+| Impossible de se connecter | Un admin donne un nouveau mot de passe dans **1.7 Comptes** ; sinon `docker exec -it md-converter python manage.py passwd <nom>` |
+| « Changez d'abord votre mot de passe provisoire » | Normal : choisir son mot de passe dans la fenêtre qui s'ouvre, puis `Ctrl+F5` |
 | « Aucune carte NVIDIA détectée » | Le bloc `deploy:` du service `md-admin` donne le GPU au conteneur ; vérifier `docker exec md-admin nvidia-smi` |
 | « Prompteur injoignable » | `docker exec md-converter python -c "import urllib.request;print(urllib.request.urlopen('http://ia-ollama-1:11434/api/version').read())"` |
 | Document « erreur » | Survol du statut pour le détail ; un redémarrage pendant une conversion demande de renvoyer le fichier |

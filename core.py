@@ -22,7 +22,7 @@ FALLBACK_MODEL = os.environ.get("FALLBACK_MODEL", "qwen3:4b-instruct")
 NUM_CTX = int(os.environ.get("NUM_CTX", "8192"))
 RESERVE = 1200  # place gardée pour l'idée, le contexte et la consigne du Modelfile
 DOC_BUDGET = NUM_CTX - RESERVE  # 6992 tokens de documents au maximum
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 # « user » : site du Prompteur (8093) · « admin » : tableau de bord, sur sa propre adresse (8094)
 APP_MODE = os.environ.get("APP_MODE", "user").strip().lower()
 SITE_URL = os.environ.get("SITE_URL", "http://md-converter:8000")  # site vu depuis le conteneur admin
@@ -39,7 +39,7 @@ DEFAULT_CONTEXT = """- Serveur maison sous Ubuntu Server : Xeon E5-2670 v3, 32 G
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users(
   id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, pw_hash TEXT NOT NULL,
-  is_admin INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL);
+  is_admin INTEGER NOT NULL DEFAULT 0, created TEXT NOT NULL, must_change INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS sessions(
   token TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires REAL NOT NULL);
@@ -92,6 +92,21 @@ def hash_pw(pw: str) -> str:
     return f"scrypt${salt.hex()}${h.hex()}"
 
 
+PW_MIN, PW_MAX = 8, 256
+USERNAME_RE = re.compile(r"^[A-Za-z0-9._-]{2,32}$")
+
+
+def password_problem(pw: str) -> str | None:
+    """Renvoie la raison du refus, ou None si le mot de passe convient."""
+    if len(pw) < PW_MIN:
+        return f"{PW_MIN} caractères minimum."
+    if len(pw) > PW_MAX:
+        return f"{PW_MAX} caractères maximum."
+    if pw.strip() != pw:
+        return "Pas d'espace au début ni à la fin."
+    return None
+
+
 def check_pw(pw: str, stored: str) -> bool:
     try:
         _, salt, h = stored.split("$")
@@ -101,11 +116,11 @@ def check_pw(pw: str, stored: str) -> bool:
     return hmac.compare_digest(calc.hex(), h)
 
 
-def create_user(username: str, password: str, is_admin: bool = False) -> int:
+def create_user(username: str, password: str, is_admin: bool = False, must_change: bool = False) -> int:
     with db() as con:
         cur = con.execute(
-            "INSERT INTO users(username, pw_hash, is_admin, created) VALUES (?,?,?,?)",
-            (username.strip(), hash_pw(password), int(is_admin), now_iso()))
+            "INSERT INTO users(username, pw_hash, is_admin, created, must_change) VALUES (?,?,?,?,?)",
+            (username.strip(), hash_pw(password), int(is_admin), now_iso(), int(must_change)))
         return cur.lastrowid
 
 
@@ -170,6 +185,17 @@ def ndjson(obj: dict) -> str:
 
 
 # ---------- Démarrage ----------
+def migrate(con):
+    """Mises à jour d'une base créée par une version précédente (chaque étape peut être refaite)."""
+    cols = {r[1] for r in con.execute("PRAGMA table_info(users)")}
+    if "must_change" not in cols:  # 0.7.0 : mot de passe provisoire à changer
+        try:
+            con.execute("ALTER TABLE users ADD COLUMN must_change INTEGER NOT NULL DEFAULT 0")
+        except sqlite3.OperationalError as e:
+            if "duplicate column" not in str(e):  # l'autre conteneur l'a ajoutée entre-temps
+                raise
+
+
 def init_db():
     """Lancé par les deux conteneurs (site et admin) : chaque étape supporte d'être faite deux fois."""
     os.makedirs(TMP_DIR, exist_ok=True)
@@ -180,6 +206,7 @@ def init_db():
                 if APP_MODE != "admin":
                     con.execute("PRAGMA journal_mode=WAL")
                 con.executescript(SCHEMA)
+                migrate(con)
             break
         except sqlite3.OperationalError as e:
             if "locked" not in str(e) or attempt == 29:
