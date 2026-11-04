@@ -14,3 +14,8 @@ __pycache__/
 *.pyc
 public/
 .hugo_build.lock
+
+# Tests
+rapports-tests/
+.pytest_cache/
+.venv/
