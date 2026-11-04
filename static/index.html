@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Utilisation · Prompteur Claude</title>
+<meta name="theme-color" content="#0b2420">
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<header>
+  <nav class="nav">
+    <div class="logo"><a href="index.html">Prompteur Claude</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
+    <ul id="menu">
+      <li><a href="admin.html">Admin</a></li>
+      <li><a href="index.html">Utilisation</a></li>
+      <li><a href="chat.html">Tchat Claude</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main class="main">
+  <div class="page-header">
+    <h1>Utilisation</h1>
+    <p>Une idée + un document → un prompt court (Contexte, Tâche, Contraintes, Format).</p>
+  </div>
+
+  <!-- 2.1 Bibliothèque -->
+  <h2><span class="num">2.1</span>Bibliothèque de documents</h2>
+  <div class="drop" id="drop">
+    <strong>Glissez vos fichiers ici</strong> ou cliquez pour choisir<br>
+    <span class="muted">PDF, Office, LibreOffice, mails, images, HTML, texte, EPUB, ZIP, audio… · 50 Mo max</span>
+    <input type="file" id="file" multiple hidden>
+  </div>
+
+  <!-- 2.5 Recherche -->
+  <div class="row" style="margin:16px 0 12px">
+    <input id="search" placeholder="Rechercher par nom, étiquette…" style="flex:2; min-width:180px">
+    <select id="tag-filter" style="flex:1; min-width:140px"><option value="">Toutes les étiquettes</option></select>
+    <input type="date" id="date-filter" style="flex:1; min-width:140px" title="Depuis le">
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th title="Utiliser dans le prompt"><input type="checkbox" id="sel-all" style="width:auto" title="Tout sélectionner"></th><th>Nom</th><th>Type détecté</th><th>Date</th><th class="num">Taille</th><th class="num">Tokens</th><th>Étiquettes</th><th>Statut</th></tr></thead>
+      <tbody id="lib"></tbody>
+    </table>
+  </div>
+
+  <!-- 2.2 Conversion selon le type -->
+  <h2><span class="num">2.2</span>Conversion selon le type</h2>
+  <details class="card">
+    <summary style="cursor:pointer">Formats pris en charge et convertisseurs</summary>
+    <div class="table-wrap" style="margin-top:12px">
+      <table><thead><tr><th>Famille</th><th>Formats</th><th>Outil</th></tr></thead><tbody id="formats" style="cursor:default"></tbody></table>
+    </div>
+  </details>
+
+  <!-- 2.3 Aperçu -->
+  <h2><span class="num">2.3</span>Aperçu Markdown en cache</h2>
+  <div class="card" id="preview">
+    <p class="muted" style="margin:0">Sélectionnez un document dans la bibliothèque.</p>
+  </div>
+
+  <!-- 2.4 Composer -->
+  <h2><span class="num">2.4</span>Composer un prompt</h2>
+  <div class="card">
+    <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));">
+      <div><label for="c-add">Ajouter un document</label>
+        <select id="c-add"></select></div>
+      <div><label for="c-ctx">Contexte enregistré</label><select id="c-ctx"></select></div>
+    </div>
+    <label>Documents utilisés <span id="c-count"></span></label>
+    <ul class="tags" id="c-docs"></ul>
+    <div class="bar" title="Part de num_ctx (8192 tokens) utilisée"><span id="c-budget"></span></div>
+    <p class="muted" id="c-budget-txt" style="margin:4px 0 0"></p>
+    <label for="c-idea">Votre idée</label>
+    <textarea id="c-idea" placeholder="Ex. : dis-moi si ce devis est un bon choix pour mon serveur"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" id="c-go">Générer le prompt</button>
+      <span class="muted" id="c-info"></span>
+    </div>
+    <pre class="prompt" id="c-out" hidden></pre>
+    <div class="row" id="c-actions" hidden>
+      <button class="btn" id="c-copy">Recopier</button>
+      <a class="btn" href="chat.html" id="c-send">Envoyer à Claude →</a>
+      <span class="muted" id="c-tok"></span>
+    </div>
+  </div>
+</main>
+
+<footer class="footer">© 2026 Prompteur Claude · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
+
+<script>
+const MAX_SIZE = 50 * 1024 * 1024;
+const FAMILIES = [
+  { fam: "Bureautique Microsoft", ext: ["docx","pptx","xlsx","doc","xls","ppt"], tool: "Convertisseurs actuels, LibreOffice sans affichage (anciens formats)" },
+  { fam: "Bureautique libre", ext: ["odt","ods","odp","rtf"], tool: "LibreOffice sans affichage ou pandoc" },
+  { fam: "Mails", ext: ["msg","eml"], tool: "extract-msg, email (Python)" },
+  { fam: "PDF", ext: ["pdf"], tool: "Extraction actuelle, OCR Tesseract si aucun texte" },
+  { fam: "Images", ext: ["png","jpg","jpeg","tif","tiff","webp"], tool: "OCR Tesseract (fra + eng)" },
+  { fam: "Web", ext: ["html","htm","mhtml"], tool: "Convertisseur actuel / .html enregistré" },
+  { fam: "Texte et données", ext: ["txt","md","csv","json","xml","yaml","yml","py","js","sh"], tool: "Lecture directe, CSV en tableau" },
+  { fam: "Livres", ext: ["epub"], tool: "pandoc" },
+  { fam: "Archives", ext: ["zip"], tool: "Décompression contrôlée, puis conversion de chaque fichier" },
+  { fam: "Audio et vidéo", ext: ["mp3","wav","mp4"], tool: "Whisper small sur CPU (optionnel)" },
+];
+const detect = (name) => {
+  const ext = name.split(".").pop().toLowerCase();
+  return FAMILIES.find((f) => f.ext.includes(ext)) || null;
+};
+
+let lib = [], contexts = [], current = null;
+const statusCls = { "prêt": "ok", "en cours": "warn" };
+
+function renderLib() {
+  const q = $("#search").value.toLowerCase(), tag = $("#tag-filter").value, since = $("#date-filter").value;
+  const rows = lib.filter((d) =>
+    (d.name + " " + d.tags.join(" ")).toLowerCase().includes(q) &&
+    (!tag || d.tags.includes(tag)) &&
+    (!since || new Date(d.date) >= new Date(since)));
+  $("#lib").innerHTML = rows.map((d) => `
+    <tr data-id="${d.id}">
+      <td><input type="checkbox" class="pick" data-id="${d.id}" style="width:auto" ${selected.has(String(d.id)) ? "checked" : ""} ${d.status === "prêt" ? "" : "disabled"}></td>
+      <td class="clip mono">${esc(d.name)}</td>
+      <td>${esc(d.type)}</td>
+      <td style="white-space:nowrap">${fmtDate(d.date)}</td>
+      <td class="num">${fmtSize(d.size)}</td>
+      <td class="num">${d.tokens ? d.tokens.toLocaleString("fr-FR") : "–"}</td>
+      <td><ul class="tags">${d.tags.map((t) => `<li class="tag">${esc(t)}</li>`).join("")}</ul></td>
+      <td><span class="status ${statusCls[d.status] || "err"}">${esc(d.status)}</span></td>
+    </tr>`).join("") || `<tr><td colspan="8" class="muted">Aucun document.</td></tr>`;
+
+  const tags = [...new Set(lib.flatMap((d) => d.tags))].sort();
+  const sel = $("#tag-filter").value;
+  $("#tag-filter").innerHTML = `<option value="">Toutes les étiquettes</option>` + tags.map((t) => `<option ${t === sel ? "selected" : ""}>${esc(t)}</option>`).join("");
+  renderSelection();
+}
+
+/* ---------- Sélection de plusieurs documents ---------- */
+const NUM_CTX = 8192, RESERVE = 1200; // place gardée pour l'idée, le contexte et la consigne du Modelfile
+const selected = new Set();
+const docTokens = (d) => d.sections ? d.sections.filter((s) => s.on).reduce((n, s) => n + tokens(s.text), 0) : d.tokens;
+
+function toggleDoc(id, on) {
+  id = String(id);
+  on ? selected.add(id) : selected.delete(id);
+  renderLib();
+}
+
+function renderSelection() {
+  const docs = [...selected].map((id) => lib.find((d) => String(d.id) === id)).filter(Boolean);
+  const total = docs.reduce((n, d) => n + docTokens(d), 0);
+  const budget = NUM_CTX - RESERVE, pct = Math.min(100, (total / budget) * 100);
+
+  $("#c-count").textContent = docs.length ? `(${docs.length})` : "";
+  $("#c-docs").innerHTML = docs.length
+    ? docs.map((d) => `<li class="tag" style="color:var(--primary)">${esc(d.name)} · ${docTokens(d)}
+        <button data-rm="${d.id}" title="Retirer" style="background:none;border:0;color:var(--secondary);cursor:pointer;padding:0 0 0 6px;font-size:14px">✕</button></li>`).join("")
+    : `<li class="muted">Aucun : cochez des documents dans la bibliothèque ou ajoutez-les ci-dessus.</li>`;
+  $("#c-budget").style.width = pct + "%";
+  $("#c-budget").style.background = total > budget ? "var(--err)" : pct > 80 ? "var(--warn)" : "";
+  $("#c-budget-txt").innerHTML = total > budget
+    ? `<span class="status err">${total.toLocaleString("fr-FR")} tokens : trop pour num_ctx (${budget.toLocaleString("fr-FR")} disponibles). Retirez un document ou des sections.</span>`
+    : `${total.toLocaleString("fr-FR")} / ${budget.toLocaleString("fr-FR")} tokens de documents (num_ctx ${NUM_CTX} moins ${RESERVE} réservés)`;
+  $("#c-go").disabled = total > budget;
+
+  const ready = lib.filter((d) => d.status === "prêt" && !selected.has(String(d.id)));
+  $("#c-add").innerHTML = `<option value="">${ready.length ? "Choisir…" : "Tous les documents prêts sont ajoutés"}</option>` +
+    ready.map((d) => `<option value="${d.id}">${esc(d.name)} (${docTokens(d)} tokens)</option>`).join("");
+
+  const picks = lib.filter((d) => d.status === "prêt");
+  $("#sel-all").checked = picks.length > 0 && picks.every((d) => selected.has(String(d.id)));
+}
+
+function fakeMarkdown(d) {
+  return [
+    { title: "Résumé", text: `Document « ${d.name} » converti en Markdown allégé.` },
+    { title: "Informations principales", text: "- Élément 1 : valeur\n- Élément 2 : valeur\n- Élément 3 : valeur" },
+    { title: "Détails", text: "Paragraphe de détails assez long, gardé ou retiré selon le besoin. ".repeat(12) },
+    { title: "Mentions légales", text: "Texte peu utile pour le prompt. ".repeat(20) },
+  ];
+}
+
+function showPreview(d) {
+  current = d;
+  if (d.status === "non pris en charge") {
+    $("#preview").innerHTML = `<h3>${esc(d.name)}</h3><p><span class="status err">Format non pris en charge</span></p>
+      <p class="muted">Convertissez-le en PDF ou DOCX, puis renvoyez-le.</p>`; return;
+  }
+  if (d.status === "en cours") {
+    $("#preview").innerHTML = `<h3>${esc(d.name)}</h3><p><span class="status warn">Conversion en cours (OCR)…</span></p>
+      <p class="muted">La page reste utilisable pendant ce temps.</p>`; return;
+  }
+  const secs = d.sections || (d.sections = fakeMarkdown(d).map((s) => ({ ...s, on: s.title !== "Mentions légales" })));
+  const full = secs.reduce((n, s) => n + tokens(s.text), 0);
+  const kept = secs.filter((s) => s.on).reduce((n, s) => n + tokens(s.text), 0);
+  $("#preview").innerHTML = `
+    <div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(d.name)}</h3>
+      <span class="muted">Tokens : ${full} avant → <strong>${kept}</strong> après allègement</span></div>
+    <div class="bar"><span style="width:${Math.round((kept / Math.max(full, 1)) * 100)}%"></span></div>
+    <p class="muted" style="margin:12px 0 4px">Sections à garder :</p>
+    <div class="row">${secs.map((s, i) => `<label style="margin:0;display:flex;gap:6px;align-items:center;color:var(--primary)">
+      <input type="checkbox" data-sec="${i}" ${s.on ? "checked" : ""} style="width:auto"> ${esc(s.title)} <span class="muted">(${tokens(s.text)})</span></label>`).join("")}</div>
+    <pre class="prompt">${secs.filter((s) => s.on).map((s) => `## ${esc(s.title)}\n${esc(s.text)}`).join("\n\n")}</pre>
+    ${kept > 8192 ? `<p class="status warn">Dépasse num_ctx (8192) : retirez des sections.</p>` : ""}`;
+  $("#preview").querySelectorAll("[data-sec]").forEach((c) => c.addEventListener("change", () => { secs[c.dataset.sec].on = c.checked; showPreview(d); renderSelection(); }));
+  $("#preview").insertAdjacentHTML("beforeend", `<div class="row"><button class="btn" id="p-use">${selected.has(String(d.id)) ? "✓ Utilisé dans le prompt" : "+ Utiliser dans le prompt"}</button></div>`);
+  $("#p-use").onclick = () => { toggleDoc(d.id, !selected.has(String(d.id))); showPreview(d); };
+}
+
+function addFiles(files) {
+  [...files].forEach((f) => {
+    if (f.size > MAX_SIZE) return toast(`${f.name} : trop volumineux (max 50 Mo)`);
+    const fam = detect(f.name);
+    const slow = fam && ["Images", "Audio et vidéo"].includes(fam.fam);
+    const doc = { id: Date.now() + Math.random(), name: f.name, type: fam ? fam.fam : "Inconnu", date: new Date().toISOString(),
+      size: f.size, tokens: 0, tags: [], status: fam ? "en cours" : "non pris en charge" };
+    lib.unshift(doc);
+    if (fam) setTimeout(() => { doc.status = "prêt"; doc.tokens = Math.round(f.size / 40) || 120; renderLib(); toast(`${f.name} converti`); }, slow ? 4000 : 1200);
+  });
+  renderLib();
+}
+
+async function generate() {
+  const idea = $("#c-idea").value.trim();
+  if (!idea) return toast("Saisissez une idée");
+  const docs = [...selected].map((id) => lib.find((d) => String(d.id) === id)).filter(Boolean);
+  const ctx = contexts.find((c) => String(c.id) === $("#c-ctx").value);
+  const resumes = docs.length
+    ? docs.map((d, i) => `- Document ${i + 1}, « ${d.name} » : résumé fidèle en 1 à 2 phrases.`).join("\n")
+    : "- Aucun document joint.";
+  const multi = docs.length > 1 ? "\n- Cite le document concerné (Document 1, 2…) pour chaque point.\n- Signale les contradictions entre documents." : "";
+  const prompt = `## Contexte\n${ctx ? ctx.text + "\n" : ""}${resumes}\n\n## Tâche\n${idea}\n\n## Contraintes\n- Reste factuel et concis.${multi}\n\n## Format\nRéponse courte, liste à puces si utile.`;
+  $("#c-go").disabled = true; $("#c-out").hidden = false; $("#c-out").textContent = ""; $("#c-actions").hidden = true;
+  const t0 = performance.now(); $("#c-info").textContent = "Génération par prompteur-claude…";
+  await fakeStream(prompt, (c) => ($("#c-out").textContent += c), 18);
+  $("#c-info").textContent = `Terminé en ${((performance.now() - t0) / 1000).toFixed(1)} s`;
+  $("#c-tok").textContent = `≈ ${tokens(prompt)} tokens`;
+  $("#c-actions").hidden = false; $("#c-go").disabled = false;
+  try { sessionStorage.setItem("last-prompt", prompt); } catch (e) {}
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  $("#formats").innerHTML = FAMILIES.map((f) => `<tr><td>${f.fam}</td><td class="mono">${f.ext.join(", ").toUpperCase()}</td><td>${f.tool}</td></tr>`).join("");
+  [lib, contexts] = await Promise.all([api.get("/api/library"), api.get("/api/contexts")]);
+  $("#c-ctx").innerHTML = `<option value="">Aucun</option>` + contexts.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  renderLib();
+
+  const drop = $("#drop");
+  drop.addEventListener("click", () => $("#file").click());
+  $("#file").addEventListener("change", (e) => addFiles(e.target.files));
+  ["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", (e) => addFiles(e.dataTransfer.files));
+
+  $("#lib").addEventListener("click", (e) => { if (e.target.matches(".pick")) return; const tr = e.target.closest("tr[data-id]"); if (tr) showPreview(lib.find((d) => String(d.id) === tr.dataset.id)); });
+  ["input", "change"].forEach((ev) => { $("#search").addEventListener(ev, renderLib); $("#tag-filter").addEventListener(ev, renderLib); $("#date-filter").addEventListener(ev, renderLib); });
+  $("#lib").addEventListener("change", (e) => { if (e.target.matches(".pick")) toggleDoc(e.target.dataset.id, e.target.checked); });
+  $("#sel-all").addEventListener("change", (e) => {
+    lib.filter((d) => d.status === "prêt").forEach((d) => e.target.checked ? selected.add(String(d.id)) : selected.delete(String(d.id)));
+    renderLib();
+  });
+  $("#c-add").addEventListener("change", (e) => { if (e.target.value) toggleDoc(e.target.value, true); });
+  $("#c-docs").addEventListener("click", (e) => { const b = e.target.closest("[data-rm]"); if (b) toggleDoc(b.dataset.rm, false); });
+  $("#c-go").addEventListener("click", generate);
+  $("#c-copy").addEventListener("click", () => copy($("#c-out").textContent));
+});
+</script>
+</body>
+</html>

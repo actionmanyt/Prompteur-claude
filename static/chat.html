@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tchat Claude · Prompteur Claude</title>
+<meta name="theme-color" content="#0b2420">
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<header>
+  <nav class="nav">
+    <div class="logo"><a href="index.html">Prompteur Claude</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
+    <ul id="menu">
+      <li><a href="admin.html">Admin</a></li>
+      <li><a href="index.html">Utilisation</a></li>
+      <li><a href="chat.html">Tchat Claude</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main class="main">
+  <div class="page-header">
+    <h1>Tchat Claude <span class="tag">optionnel</span></h1>
+    <p>Envoi direct d'un prompt à l'API, avec compteur de coût. Ollama reste en secours si l'API ne répond pas.</p>
+  </div>
+
+  <!-- 3.2 Compteur de coût -->
+  <h2><span class="num">3.2</span>Compteur de coût</h2>
+  <div class="grid">
+    <div class="card"><div class="muted">Dernier message</div><div class="stat" id="k-last">0,000 <small>$</small></div><div class="muted" id="k-last-tok">–</div></div>
+    <div class="card"><div class="muted">Cumul du mois</div><div class="stat" id="k-month">0,00 <small>$</small></div><div class="bar"><span id="k-bar"></span></div><div class="muted" id="k-cap"></div></div>
+    <div class="card"><div class="muted">Tokens ce mois</div><div class="stat" id="k-tok">0</div><div class="muted">entrée + sortie</div></div>
+  </div>
+
+  <!-- 3.1 / 3.3 Fil de conversation -->
+  <h2><span class="num">3.1</span>Envoi direct et fil de conversation</h2>
+  <div class="card">
+    <div class="row" style="justify-content:space-between; margin-bottom:12px">
+      <select id="model" style="width:auto">
+        <option value="haiku">Claude Haiku (économique)</option>
+        <option value="sonnet">Claude Sonnet (qualité)</option>
+      </select>
+      <div class="row">
+        <label style="margin:0; display:flex; gap:6px; align-items:center"><input type="checkbox" id="sim-fail" style="width:auto"> Simuler une panne API</label>
+        <button class="btn" id="clear">Nouvelle conversation</button>
+      </div>
+    </div>
+    <div class="chat" id="chat"><p class="muted" style="margin:0">Aucun message. Collez un prompt ou venez de la page Utilisation.</p></div>
+    <label for="msg">Message</label>
+    <textarea id="msg" placeholder="Collez votre prompt…"></textarea>
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" id="send">Envoyer à Claude</button>
+      <span class="muted" id="est"></span>
+    </div>
+  </div>
+
+  <!-- 3.4 Réglages API -->
+  <h2><span class="num">3.4</span>Réglages API</h2>
+  <div class="card">
+    <label for="key">Clé API</label>
+    <input id="key" type="password" value="" placeholder="Lue depuis la variable ANTHROPIC_API_KEY du conteneur" disabled>
+    <p class="muted" style="margin:4px 0 0">Jamais saisie ici ni stockée dans <code>app.py</code> : variable d'environnement ou Vaultwarden. État : <span class="status ok" id="key-state">détectée (test)</span></p>
+    <div class="grid" style="margin-top:8px">
+      <div><label for="cap">Plafond mensuel ($)</label><input id="cap" type="number" min="0" step="1" value="5"></div>
+      <div><label for="default-model">Modèle par défaut</label>
+        <select id="default-model"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option></select></div>
+    </div>
+    <p class="muted">Tarifs utilisés pour l'estimation ($ par million de tokens, entrée / sortie) — à vérifier sur la page tarifs d'Anthropic :</p>
+    <div class="grid">
+      <div><label>Haiku entrée / sortie</label><div class="row"><input id="p-h-in" type="number" step="0.01" value="1" style="flex:1"><input id="p-h-out" type="number" step="0.01" value="5" style="flex:1"></div></div>
+      <div><label>Sonnet entrée / sortie</label><div class="row"><input id="p-s-in" type="number" step="0.01" value="3" style="flex:1"><input id="p-s-out" type="number" step="0.01" value="15" style="flex:1"></div></div>
+    </div>
+    <div class="row" style="margin-top:16px"><button class="btn primary" id="save">Enregistrer</button></div>
+  </div>
+</main>
+
+<footer class="footer">© 2026 Prompteur Claude · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a></footer>
+
+<script>
+let thread = [], month = { cost: 0.42, tokens: 61200 }; // cumul fictif de départ
+
+const price = (m) => m === "sonnet"
+  ? { in: +$("#p-s-in").value, out: +$("#p-s-out").value }
+  : { in: +$("#p-h-in").value, out: +$("#p-h-out").value };
+const money = (v, d = 2) => v.toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
+
+function renderCost(last) {
+  const cap = +$("#cap").value || 0;
+  if (last) {
+    $("#k-last").innerHTML = `${money(last.cost, 4)} <small>$</small>`;
+    $("#k-last-tok").textContent = `${last.tin} entrée · ${last.tout} sortie · ${last.model}`;
+  }
+  $("#k-month").innerHTML = `${money(month.cost)} <small>$</small>`;
+  $("#k-tok").textContent = month.tokens.toLocaleString("fr-FR");
+  const pct = cap ? Math.min(100, (month.cost / cap) * 100) : 0;
+  $("#k-bar").style.width = pct + "%";
+  $("#k-bar").style.background = pct > 90 ? "var(--err)" : pct > 70 ? "var(--warn)" : "";
+  $("#k-cap").textContent = cap ? `${Math.round(pct)} % du plafond de ${cap} $` : "Aucun plafond";
+}
+
+function renderThread() {
+  $("#chat").innerHTML = thread.length ? thread.map((m, i) =>
+    `<div class="msg ${m.role === "user" ? "user" : "bot"}" id="m${i}">${esc(m.text)}${m.meta ? `<span class="muted">${esc(m.meta)}</span>` : ""}</div>`).join("")
+    : `<p class="muted" style="margin:0">Aucun message.</p>`;
+  $("#chat").scrollTop = $("#chat").scrollHeight;
+}
+
+function estimate() {
+  const t = tokens($("#msg").value), p = price($("#model").value);
+  $("#est").textContent = t ? `≈ ${t} tokens d'entrée · ≈ ${money((t * p.in) / 1e6, 4)} $ avant réponse` : "";
+}
+
+async function send() {
+  const text = $("#msg").value.trim(); if (!text) return;
+  const model = $("#model").value, cap = +$("#cap").value || 0;
+  if (cap && month.cost >= cap) return toast("Plafond mensuel atteint : envoi bloqué");
+  thread.push({ role: "user", text }); $("#msg").value = ""; estimate();
+  const bot = { role: "bot", text: "" }; thread.push(bot); renderThread();
+  $("#send").disabled = true;
+  const el = $("#m" + (thread.length - 1));
+
+  const fail = $("#sim-fail").checked;
+  const answer = fail
+    ? "(Réponse de secours rédigée par Ollama / prompteur-claude, l'API Claude n'a pas répondu.)\nVoici une réponse locale courte au prompt envoyé."
+    : "Voici une réponse de test de Claude.\n\n- Point 1 : le devis est cohérent avec le besoin.\n- Point 2 : une alternative d'occasion coûte environ 40 % de moins.\n\nRecommandation : à valider selon votre budget.";
+  await fakeStream(answer, (c) => { bot.text += c; el.textContent = bot.text; $("#chat").scrollTop = 1e9; }, 22);
+
+  const ctxTok = thread.slice(0, -1).reduce((n, m) => n + tokens(m.text), 0); // tout le fil est renvoyé
+  const tin = ctxTok, tout = tokens(answer), p = price(model);
+  const cost = fail ? 0 : (tin * p.in + tout * p.out) / 1e6;
+  bot.meta = fail ? "Ollama (secours) · 0 $" : `${model} · ${tin} + ${tout} tokens · ${money(cost, 4)} $`;
+  if (!fail) { month.cost += cost; month.tokens += tin + tout; }
+  renderThread(); renderCost({ cost, tin, tout, model: fail ? "ollama" : model });
+  $("#send").disabled = false;
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  try { const p = sessionStorage.getItem("last-prompt"); if (p) { $("#msg").value = p; sessionStorage.removeItem("last-prompt"); } } catch (e) {}
+  $("#model").value = $("#default-model").value;
+  $("#msg").addEventListener("input", estimate); $("#model").addEventListener("change", estimate);
+  $("#send").addEventListener("click", send);
+  $("#msg").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send(); });
+  $("#clear").addEventListener("click", () => { thread = []; renderThread(); });
+  $("#cap").addEventListener("input", () => renderCost());
+  $("#save").addEventListener("click", () => { $("#model").value = $("#default-model").value; toast("Réglages enregistrés (test)"); renderCost(); });
+  estimate(); renderCost();
+});
+</script>
+</body>
+</html>
