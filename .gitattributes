@@ -1,0 +1,3 @@
+# Fins de ligne LF pour les fichiers lus sur le serveur (Linux)
+*.sh text eol=lf
+Modelfile-prompteur-claude.txt text eol=lf
