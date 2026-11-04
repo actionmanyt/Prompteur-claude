@@ -53,6 +53,7 @@
 }
 
 * { box-sizing: border-box; }
+[hidden] { display: none !important; }
 html { -webkit-tap-highlight-color: transparent; }
 body {
   margin: 0;

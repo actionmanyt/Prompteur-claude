@@ -14,6 +14,7 @@ services:
       - OLLAMA_URL=http://ia-ollama-1:11434
       - PROMPT_MODEL=prompteur-claude
       - FALLBACK_MODEL=qwen3:4b-instruct
+      - SERVER_NAME=${SERVER_NAME:-}
     volumes:
       - ./data:/data
     # GPU donné au conteneur uniquement pour lire nvidia-smi (page Admin), presque sans VRAM

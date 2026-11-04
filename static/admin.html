@@ -23,7 +23,7 @@
 <main class="main">
   <div class="page-header">
     <h1>Admin</h1>
-    <p>Serveur <code>srv</code> · GTX 1060 · actualisation toutes les <span id="every">5</span> s · <span id="last" class="muted"></span></p>
+    <p><span id="sys">Détection de la machine…</span> · actualisation toutes les <span id="every">5</span> s · <span id="last" class="muted"></span></p>
   </div>
 
   <!-- 1.1 État du GPU -->
@@ -33,6 +33,10 @@
     <div class="card"><div class="muted">VRAM</div><div class="stat" id="g-mem">–</div><div class="bar"><span id="b-mem"></span></div></div>
     <div class="card"><div class="muted">Température</div><div class="stat" id="g-temp">–</div><div class="bar"><span id="b-temp"></span></div></div>
     <div class="card"><div class="muted">Consommation</div><div class="stat" id="g-pow">–</div><div class="bar"><span id="b-pow"></span></div></div>
+  </div>
+  <div class="card" id="no-gpu" hidden>
+    <p style="margin:0"><span class="status warn">Aucune carte NVIDIA détectée</span></p>
+    <p class="muted" style="margin:4px 0 0" id="no-gpu-txt"></p>
   </div>
 
   <!-- 1.2 Modèles chargés -->
@@ -100,7 +104,23 @@ const REFRESH = 5000;
 const srcs = (h) => [].concat(h.source);
 let hist = [];
 
+let HAS_GPU = true;
+
+async function loadSystem() {
+  try {
+    const m = await api.get("/api/admin/system");
+    const parts = [`Serveur <code>${esc(m.host)}</code>`, esc(m.cpu) + (m.threads ? ` (${m.threads} threads)` : "")];
+    if (m.ram_go) parts.push(`${m.ram_go} Go de RAM`);
+    HAS_GPU = m.gpus.length > 0;
+    parts.push(HAS_GPU ? m.gpus.map((g) => esc(g.name) + (g.vram_go ? ` (${g.vram_go} Go)` : "")).join(" + ") : "sans GPU");
+    $("#sys").innerHTML = parts.join(" · ");
+    $("#gpu").hidden = !HAS_GPU; $("#no-gpu").hidden = HAS_GPU;
+    if (!HAS_GPU) $("#no-gpu-txt").textContent = `Ollama calcule sur le processeur (${m.cpu}) : les réponses seront plus lentes. Si la machine a une carte NVIDIA, vérifiez que le GPU est donné au conteneur (bloc deploy du docker-compose.yml).`;
+  } catch (e) { $("#sys").textContent = "Machine non détectée (" + e.message + ")"; }
+}
+
 async function loadGpu() {
+  if (!HAS_GPU) return;
   try {
     const g = await api.get("/api/admin/gpu");
     const pct = (v, m) => (m ? Math.min(100, Math.round((v / m) * 100)) : 0) + "%";
@@ -204,6 +224,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("#filter").addEventListener("input", renderHistory);
   $("#only-ideal").addEventListener("change", renderHistory);
   await loadHistory();
+  await loadSystem();
   loadGpu(); loadPs(); loadHealth();
   setInterval(() => { loadGpu(); loadPs(); }, REFRESH);
   setInterval(loadHealth, 30000);

@@ -1,6 +1,7 @@
 """Page Admin : GPU, modèles chargés, santé des services, export du jeu de données."""
 import json
 import os
+import re
 import subprocess
 import time
 import urllib.error
@@ -45,6 +46,47 @@ def gpu():
     f = [x.strip() for x in out.strip().splitlines()[0].split(",")]
     return {"name": f[0], "util": round(num(f[1])), "mem_used": round(num(f[2])), "mem_total": round(num(f[3])),
             "temp": round(num(f[4])), "power": round(num(f[5])), "power_limit": round(num(f[6]))}
+
+
+def short_cpu(name: str) -> str:
+    """« Intel(R) Xeon(R) CPU E5-2670 v3 @ 2.30GHz » -> « Intel Xeon E5-2670 v3 »."""
+    name = re.sub(r"\((R|TM|tm|r)\)|\bCPU\b|\bProcessor\b|@.*$|\d+-Core", "", name)
+    return re.sub(r"\s+", " ", name).strip()
+
+
+def short_gpu(name: str) -> str:
+    """« NVIDIA GeForce GTX 1060 6GB » -> « GTX 1060 6GB »."""
+    return re.sub(r"^(NVIDIA\s+)?(GeForce\s+)?", "", name.strip()) or name
+
+
+def read(path: str) -> str:
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+@router.get("/system")
+def system():
+    """Ce qui est détecté sur la machine : nom, processeur, mémoire, cartes NVIDIA."""
+    host = os.environ.get("SERVER_NAME", "").strip() or os.uname().nodename
+    cpuinfo = read("/proc/cpuinfo")
+    m = re.search(r"^model name\s*:\s*(.+)$", cpuinfo, re.M) or re.search(r"^Model\s*:\s*(.+)$", cpuinfo, re.M)
+    cpu = short_cpu(m.group(1)) if m else (os.uname().machine or "processeur inconnu")
+    threads = os.cpu_count() or 0
+    mem = re.search(r"^MemTotal:\s*(\d+)", read("/proc/meminfo"), re.M)
+    ram_go = round(int(mem.group(1)) / 1024 / 1024) if mem else 0
+    gpus = []
+    try:
+        out = subprocess.run(["nvidia-smi", "--query-gpu=name,memory.total", "--format=csv,noheader,nounits"],
+                             capture_output=True, text=True, timeout=5, check=True).stdout
+        for line in filter(None, out.strip().splitlines()):
+            name, _, vram = line.partition(",")
+            gpus.append({"name": short_gpu(name), "vram_go": round(num(vram.strip()) / 1024)})
+    except Exception:
+        pass
+    return {"host": host, "cpu": cpu, "threads": threads, "ram_go": ram_go, "gpus": gpus}
 
 
 @router.get("/ps")

@@ -22,7 +22,7 @@ fi
 git pull --ff-only
 
 # 3. Reconstruction avec le numéro de commit affiché dans l'Admin
-GIT_COMMIT=$(git rev-parse --short HEAD) docker compose up -d --build
+GIT_COMMIT=$(git rev-parse --short HEAD) SERVER_NAME=$(hostname) docker compose up -d --build
 
 # 4. Vérifications
 sleep 5
