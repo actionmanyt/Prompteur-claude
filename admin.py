@@ -154,8 +154,9 @@ def dataset():
     lines = []
     with db() as con:
         for h in history_rows(con, "WHERE ideal = 1"):
-            excerpts = []
-            for doc_id in h["doc_ids"]:
+            # Extrait saisi à la main (prompt idéal ajouté dans le tableau de bord), sinon celui des documents
+            excerpts = [h["excerpt"]] if h["excerpt"] else []
+            for doc_id in ([] if excerpts else h["doc_ids"]):
                 r = con.execute("SELECT sections FROM documents WHERE id=?", (doc_id,)).fetchone()
                 if r:
                     excerpts.append(kept_text(json.loads(r["sections"] or "[]"))[:4000])

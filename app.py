@@ -13,12 +13,14 @@ import accounts
 import admin
 import auth
 import chat
+import ideals
 import legacy
 import library
 import prompts
 from core import APP_MODE, init_db
 
 init_db()
+ideals.migrate_db()  # 0.8.0 : prompts idéaux ajoutés à la main
 ADMIN_SITE = APP_MODE == "admin"
 app = FastAPI(title="Prompteur Claude", docs_url=None, redoc_url=None, openapi_url=None)
 
@@ -64,7 +66,7 @@ def site_info():
 PUBLIC.add("/api/site")
 
 routers = [auth.router, library.router, prompts.router, chat.router]
-routers += [admin.router, accounts.router] if ADMIN_SITE else [legacy.router]
+routers += [admin.router, accounts.router, ideals.router] if ADMIN_SITE else [legacy.router]
 for r in routers:
     app.include_router(r)
 

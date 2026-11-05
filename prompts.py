@@ -115,7 +115,9 @@ def history_rows(con, where: str = "", args: tuple = ()):
             "context_id": r["context_id"], "attach": bool(r["attach"]),
             "tokens_before": r["tokens_before"] or 0, "tokens_after": r["tokens_after"] or 0,
             "duration_s": r["duration_s"] or 0, "model": r["model"], "ideal": bool(r["ideal"]),
-            "prompt": r["prompt"]})
+            "prompt": r["prompt"],
+            "excerpt": (r["excerpt"] if "excerpt" in r.keys() else None) or "",
+            "manual": bool(r["manual"]) if "manual" in r.keys() else False})
     return out
 
 

@@ -62,6 +62,7 @@
     <label style="margin:0; display:flex; gap:6px; align-items:center; white-space:nowrap">
       <input type="checkbox" id="only-ideal" style="width:auto"> Idéaux seulement
     </label>
+    <button class="btn primary" type="button" id="add-ideal" title="Écrire un prompt idéal à la main">+ Ajouter un prompt idéal</button>
   </div>
   <div class="table-wrap">
     <table>
@@ -69,12 +70,12 @@
       <tbody id="history"></tbody>
     </table>
   </div>
-  <p class="muted">Cliquez sur une ligne pour voir le détail (1.5).</p>
+  <p class="muted">Cliquez sur une ligne pour voir le détail (1.5). Les prompts écrits à la main portent le modèle <code>manuel</code>.</p>
 
   <!-- 1.6 Export -->
   <h2><span class="num">1.6</span>Export du jeu de données</h2>
   <div class="card">
-    <p style="margin-top:0">Exporte les entrées marquées « prompt idéal » vers <code>dataset.jsonl</code> (idée, sources, extrait des documents, prompt idéal).</p>
+    <p style="margin-top:0">Exporte les entrées marquées « prompt idéal » vers <code>dataset.jsonl</code> (idée, sources, extrait, prompt idéal). Pour une entrée écrite à la main, l'extrait saisi remplace celui des documents.</p>
     <div class="row">
       <button class="btn primary" onclick="exportDataset()">Télécharger dataset.jsonl</button>
       <span class="muted" id="ideal-count"></span>
@@ -146,9 +147,35 @@
     <button class="btn primary" id="d-copy">Recopier</button>
     <button class="btn" id="d-regen">Régénérer</button>
     <button class="btn" id="d-ideal"></button>
+    <button class="btn" id="d-fix"></button>
     <span style="flex:1"></span>
     <button class="btn" onclick="$('#detail').close()">Fermer</button>
   </div>
+</dialog>
+
+<!-- Prompt idéal écrit ou corrigé à la main -->
+<dialog id="ideal-dlg" style="width:min(820px, calc(100vw - 32px))">
+  <h3 style="margin-top:0" id="i-title">Ajouter un prompt idéal</h3>
+  <p class="muted" id="i-from" hidden style="margin-top:0"></p>
+  <form id="ideal-form" autocomplete="off">
+    <label for="i-idea" style="margin-top:0">Idée de départ <span class="muted">(telle que saisie dans le Prompteur)</span></label>
+    <textarea id="i-idea" required maxlength="2000" style="min-height:70px"></textarea>
+    <label for="i-excerpt">Extrait du document <span class="muted">(facultatif : le texte que le modèle doit résumer)</span></label>
+    <textarea id="i-excerpt" style="min-height:90px"></textarea>
+    <p class="muted" id="i-docs" hidden style="margin:4px 0 0; font-size:14px"></p>
+    <div class="row" style="justify-content:space-between; align-items:flex-end">
+      <label for="i-prompt">Prompt idéal</label>
+      <button class="btn" type="button" id="i-skel" title="Insérer les 4 sections">Gabarit</button>
+    </div>
+    <textarea id="i-prompt" required maxlength="20000" class="mono" style="min-height:260px"></textarea>
+    <p class="muted" id="i-check" style="margin:6px 0 0; font-size:14px"></p>
+    <p id="i-err" class="status err" hidden></p>
+    <div class="row" style="margin-top:12px">
+      <button class="btn primary" type="submit" id="i-save">Enregistrer comme prompt idéal</button>
+      <span style="flex:1"></span>
+      <button class="btn" type="button" onclick="$('#ideal-dlg').close()">Annuler</button>
+    </div>
+  </form>
 </dialog>
 
 <footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a> · <a href="https://github.com/actionmanyt/Prompteur-claude">Code source (AGPL-3.0)</a></footer>
@@ -237,9 +264,13 @@ function openDetail(id) {
     <dt>Date</dt><dd>${fmtDate(h.date)}</dd>
     <dt>Documents</dt><dd class="mono">${srcs(h).length ? srcs(h).map(esc).join("<br>") : "aucun"}</dd>
     <dt>Tokens</dt><dd>${h.tokens_before} → ${h.tokens_after} (${gain >= 0 ? "−" : "+"}${Math.abs(gain)} %)</dd>
-    <dt>Durée</dt><dd>${h.duration_s} s · <span class="mono">${esc(h.model)}</span></dd>`;
+    <dt>Durée</dt><dd>${h.manual ? "écrit à la main" : h.duration_s + " s"} · <span class="mono">${esc(h.model)}</span></dd>` +
+    (h.excerpt ? `<dt>Extrait</dt><dd class="clip" title="${esc(h.excerpt)}">${esc(h.excerpt.slice(0, 160))}${h.excerpt.length > 160 ? "…" : ""}</dd>` : "");
   $("#d-prompt").textContent = h.prompt;
   $("#d-copy").onclick = () => copy($("#d-prompt").textContent);
+  $("#d-regen").hidden = h.manual;
+  $("#d-fix").textContent = h.manual ? "✎ Modifier" : "✎ Corriger en prompt idéal";
+  $("#d-fix").onclick = () => { $("#detail").close(); openIdeal(h); };
   $("#d-regen").onclick = async () => {
     $("#d-regen").disabled = true; $("#d-prompt").textContent = "";
     try {
@@ -259,6 +290,62 @@ function openDetail(id) {
     catch (e) { toast(e.message); }
   };
   $("#detail").showModal();
+}
+
+/* ---------- Prompts idéaux écrits ou corrigés à la main ---------- */
+const SECTIONS = ["Contexte", "Tâche", "Contraintes", "Format"];
+const SKELETON = SECTIONS.map((t) => `## ${t}\n`).join("\n");
+// Le prompt généré peut finir par les documents joints (« ## Document 1 : … ») : ils ne font pas partie du prompt idéal
+const withoutAppendix = (p) => { const i = (p || "").search(/\n+## Document 1 : /); return i >= 0 ? p.slice(0, i).trim() : (p || "").trim(); };
+
+function checkIdeal() {
+  const p = $("#i-prompt").value;
+  const missing = SECTIONS.filter((t) => !new RegExp(`^#{1,3}\\s*${t}\\b`, "mi").test(p));
+  const n = tokens(p);
+  $("#i-check").innerHTML = (p ? `${n.toLocaleString("fr-FR")} tokens · ` : "") + (missing.length
+    ? `<span class="status warn">Sections absentes : ${missing.join(", ")}</span>`
+    : '<span class="status ok">Les 4 sections sont présentes</span>');
+}
+
+// h absent : nouveau prompt · h généré : correction (nouvelle entrée) · h manuel : modification
+function openIdeal(h) {
+  const edit = h && h.manual, fix = h && !h.manual;
+  $("#i-title").textContent = edit ? "Modifier le prompt idéal" : fix ? "Corriger en prompt idéal" : "Ajouter un prompt idéal";
+  $("#i-from").hidden = !fix;
+  if (fix) $("#i-from").textContent = `D'après le prompt du ${fmtDate(h.date)} (${h.model}). L'original reste dans l'historique, sans changement.`;
+  $("#i-idea").value = h ? h.idea : "";
+  $("#i-excerpt").value = h ? h.excerpt || "" : "";
+  $("#i-prompt").value = h ? withoutAppendix(h.prompt) : SKELETON;
+  const docs = h ? srcs(h) : [];
+  $("#i-docs").hidden = !docs.length;
+  $("#i-docs").textContent = docs.length ? `Documents liés : ${docs.join(", ")}. Sans extrait saisi, l'export reprend leurs sections gardées.` : "";
+  $("#i-err").hidden = true;
+  checkIdeal();
+  $("#ideal-form").onsubmit = async (e) => {
+    e.preventDefault();
+    const body = { idea: $("#i-idea").value, excerpt: $("#i-excerpt").value, prompt: $("#i-prompt").value };
+    $("#i-save").disabled = true;
+    try {
+      if (edit) await api.put(`/api/admin/ideal/${h.id}`, body);
+      else await api.post("/api/admin/ideal", fix ? { ...body, from_id: h.id } : body);
+      $("#ideal-dlg").close();
+      toast(edit ? "Prompt idéal modifié" : "Prompt idéal enregistré ★");
+      await loadHistory();
+    } catch (ex) { $("#i-err").textContent = ex.message; $("#i-err").hidden = false; }
+    finally { $("#i-save").disabled = false; }
+  };
+  $("#ideal-dlg").showModal();
+  $("#i-idea").focus();
+}
+
+function setupIdeal() {
+  $("#add-ideal").addEventListener("click", () => openIdeal());
+  $("#i-prompt").addEventListener("input", checkIdeal);
+  $("#i-skel").addEventListener("click", () => {
+    const t = $("#i-prompt");
+    if (t.value.trim() && !confirm("Remplacer le texte actuel par le gabarit vide ?")) return;
+    t.value = SKELETON; checkIdeal(); t.focus();
+  });
 }
 
 async function exportDataset() {
@@ -361,6 +448,7 @@ function setupUsers() {
 
 document.addEventListener("DOMContentLoaded", async () => {
   setupUsers();
+  setupIdeal();
   // Le site du Prompteur : même machine, port 8093
   $("#open-site").href = siteUrl();
   $("#every").textContent = REFRESH / 1000;

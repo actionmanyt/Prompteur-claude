@@ -1,6 +1,6 @@
 # Modifier et maintenir le Prompteur Claude
 
-*Version 0.7.0 (04/11/2026) : comptes gérés depuis le tableau de bord, mot de passe provisoire, « Changer mon mot de passe ».*
+*Version 0.8.0 (05/11/2026) : prompts idéaux écrits ou corrigés à la main dans le tableau de bord. 0.7.0 : comptes gérés depuis le tableau de bord, mot de passe provisoire.*
 
 ## Où sont les choses
 
@@ -21,6 +21,7 @@
 | `core.py` | Réglages, base SQLite, mots de passe, chiffrement, appels Ollama |
 | `auth.py` | `/api/login`, `/api/logout`, `/api/me`, `/api/me/password` (changer son mot de passe) |
 | `accounts.py` | `/api/admin/users` : créer, nouveau mot de passe, rôle, déconnecter, supprimer (uniquement sur le port 8094) |
+| `ideals.py` | `/api/admin/ideal` : ajouter, corriger ou modifier un prompt idéal à la main (uniquement sur le port 8094) |
 | `convert.py` | Conversion des fichiers et pages web en Markdown, découpage en sections |
 | `library.py` | `/api/library` (envoi, conversion en tâche de fond), `/api/contexts` |
 | `prompts.py` | `/api/generate` (streaming), `/api/history` |
@@ -71,6 +72,18 @@ docker exec -it md-converter python manage.py deluser marie
 ```
 
 Le premier compte admin est créé au premier démarrage à partir de `ADMIN_USER` et `ADMIN_PASSWORD` dans `.env`. La base d'une version précédente est mise à jour automatiquement au démarrage (colonne `must_change`).
+
+## Prompts idéaux (0.8.0)
+
+Dans le tableau de bord (`http://100.101.4.16:8094/`, section **1.4 Historique**) :
+
+- **+ Ajouter un prompt idéal** : écrire un prompt de zéro (idée, extrait du document facultatif, prompt). Le bouton **Gabarit** insère les 4 sections, et la fenêtre signale les sections absentes.
+- **✎ Corriger en prompt idéal** (détail d'un prompt généré) : reprend l'idée, les documents liés et le prompt, sans les documents joints à la fin. La correction devient une nouvelle entrée ; l'original reste tel quel.
+- **✎ Modifier** (détail d'une entrée manuelle) : change l'idée, l'extrait ou le prompt.
+
+Les entrées manuelles ont le modèle `manuel`, sont marquées ★ et partent dans `dataset.jsonl`. L'extrait saisi y remplace celui des documents ; sans extrait, l'export reprend les sections gardées des documents liés.
+
+Code : `ideals.py` (routes `/api/admin/ideal`, port 8094 seulement). Au démarrage, la table `history` reçoit les colonnes `excerpt` et `manual` si elles manquent.
 
 ## Clé API Claude
 
