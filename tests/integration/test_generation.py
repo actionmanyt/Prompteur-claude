@@ -32,8 +32,8 @@ def test_budget_de_tokens_verifie_par_le_serveur(site, client, monkeypatch):
 def test_budget_reel_6992(site, client, monkeypatch):
     """Un document juste sous le budget passe, juste au-dessus est refusé."""
     monkeypatch.setattr(site.m.prompts, "ollama_stream", fake_stream(["ok"]))
-    ok = add_ready_doc(site, "ok.txt", "a" * (6992 * 4))
-    trop = add_ready_doc(site, "trop.txt", "a" * (6993 * 4))
+    ok = add_ready_doc(site, "ok.txt", "a" * int(6992 * 2.5))
+    trop = add_ready_doc(site, "trop.txt", "a" * (int(6992 * 2.5) + 1))
     assert generate(client, doc_ids=[ok]).status_code == 200
     assert generate(client, doc_ids=[trop]).status_code == 400
 
@@ -109,3 +109,22 @@ def test_supprimer_entree_historique(site, client, monkeypatch):
     hid = ndjson_lines(generate(client))[-1]["id"]
     client.delete(f"/api/history/{hid}")
     assert client.get("/api/history").json() == []
+
+
+def test_refus_d_ollama_affiche_sa_raison(site, client, monkeypatch):
+    """0.7.1 : la page affiche la raison donnée par Ollama, pas « Prompteur injoignable »."""
+    err = site.m.core.OllamaError("demande refusée (HTTP 400) : the input length exceeds the context length")
+    monkeypatch.setattr(site.m.prompts, "ollama_stream", fake_stream([], error=err))
+    lines = ndjson_lines(generate(client))
+    assert lines[-1]["error"].startswith("Ollama : demande refusée (HTTP 400)")
+    assert "context length" in lines[-1]["error"]
+
+
+def test_document_trop_long_pour_ollama_message_clair(site, client, monkeypatch):
+    """0.7.1 : si l'estimation passe mais qu'Ollama refuse, la page dit combien retirer."""
+    err = site.m.core.OllamaError("demande refusée (HTTP 400) : request (9935 tokens) exceeds "
+                                  "the available context size (8192 tokens), try increasing it")
+    monkeypatch.setattr(site.m.prompts, "ollama_stream", fake_stream([], error=err))
+    msg = ndjson_lines(generate(client))[-1]["error"]
+    assert msg.startswith("Trop long pour le modèle : 9935 tokens réels pour 8192 disponibles")
+    assert "Retirez environ 23 % des sections" in msg

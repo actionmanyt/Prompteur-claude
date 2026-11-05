@@ -21,7 +21,7 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const fmtDate = (iso) => new Date(iso).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
 const fmtSize = (o) => (!o ? "–" : o > 1e6 ? (o / 1e6).toFixed(1) + " Mo" : Math.max(1, Math.round(o / 1e3)) + " ko");
-const tokens = (txt) => Math.floor((txt || "").length / 4); // estimation grossière, comme le serveur
+const tokens = (txt) => Math.ceil((txt || "").length / 2.5); // estimation prudente pour qwen3, comme le serveur
 function toast(msg) {
   let t = $(".toast");
   if (!t) { t = document.createElement("div"); t.className = "toast"; document.body.appendChild(t); }

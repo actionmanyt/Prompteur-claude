@@ -87,9 +87,27 @@ Les identifiants des modèles (`claude-haiku-5-5`, `claude-sonnet-5-5`) peuvent 
 | Impossible de se connecter | Un admin donne un nouveau mot de passe dans **1.7 Comptes** ; sinon `docker exec -it md-converter python manage.py passwd <nom>` |
 | « Changez d'abord votre mot de passe provisoire » | Normal : choisir son mot de passe dans la fenêtre qui s'ouvre, puis `Ctrl+F5` |
 | « Aucune carte NVIDIA détectée » | Le bloc `deploy:` du service `md-admin` donne le GPU au conteneur ; vérifier `docker exec md-admin nvidia-smi` |
+| « Ollama : demande refusée (HTTP …) » | La raison donnée par Ollama suit (0.7.1). Le conteneur joint Ollama, mais Ollama refuse la demande : lire aussi `docker logs <conteneur-ollama> --tail 40` juste après l'erreur |
+| « Ollama : pas de réponse en … s » | Machine sans carte graphique ou document long : augmenter `OLLAMA_TIMEOUT` (secondes, 300 par défaut) dans `.env` ou dans le compose, ou garder moins de sections |
 | « Prompteur injoignable » | `docker exec md-converter python -c "import urllib.request;print(urllib.request.urlopen('http://ia-ollama-1:11434/api/version').read())"` |
 | Document « erreur » | Survol du statut pour le détail ; un redémarrage pendant une conversion demande de renvoyer le fichier |
 | Revenir en arrière | `git log --oneline`, `git checkout <commit> -- .`, `./deploy.sh` ; base : copier un `data/prompteur.db.bak-*` sur `prompteur.db` conteneur arrêté |
+
+## Compteur de tokens
+
+Le compteur est une estimation : **2,5 caractères par token** (`CHARS_PER_TOKEN` dans `core.py`, `tokens()` dans `static/common.js`). Mesure du 05/11/2026 : un document français avec tableaux estimé 5 795 tokens avec l'ancienne règle (4 caractères) en faisait 9 935 pour `qwen3`, et Ollama refusait la demande. Au démarrage, les tokens des documents déjà en base sont recomptés.
+
+Si Ollama refuse quand même (« request (… tokens) exceeds the available context size »), la page affiche le vrai compte et le pourcentage de sections à retirer.
+
+## PC sans serveur (portable)
+
+Pour faire tourner le Prompteur sur un PC Windows avec Docker Desktop et un conteneur `ollama` (port 11434 ouvert) :
+
+1. Télécharger le dépôt (`git clone` ou ZIP), créer `data\` et `.env` (à partir de `.env.example`).
+2. Créer le modèle : `ollama pull qwen3:4b-instruct`, puis `ollama create prompteur-claude -f Modelfile-prompteur-claude.txt`.
+3. Lancer : `docker compose -f docker-compose.portable.yml up -d --build`. Site sur `http://localhost:8093`, tableau de bord sur `http://localhost:8094`.
+
+Sans carte NVIDIA, Ollama tourne sur le processeur (environ 12 tokens lus par seconde sur un portable) : `OLLAMA_TIMEOUT=900` est déjà réglé dans ce compose, et il vaut mieux garder des documents courts. La base `data\` de ce PC est séparée de celle du serveur.
 
 ## Formats
 

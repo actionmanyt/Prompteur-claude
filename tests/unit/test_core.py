@@ -9,7 +9,7 @@ import pytest
 
 # ---------- Comptage des tokens ----------
 @pytest.mark.parametrize("text, expected", [
-    ("", 0), (None, 0), ("abc", 1), ("a" * 4, 1), ("a" * 400, 100),
+    ("", 0), (None, 0), ("abc", 2), ("a" * 5, 2), ("a" * 6, 3), ("a" * 400, 160),
 ])
 def test_tokens_estimation(core, text, expected):
     assert core.tokens(text) == expected
@@ -174,3 +174,83 @@ def test_nom_utilisateur_unique(core):
     core.init_db()
     with pytest.raises(sqlite3.IntegrityError):
         core.create_user(" admin ", "autre-mot-de-passe")
+
+
+# ---------- Appel à Ollama : messages d'erreur et délai (0.7.1) ----------
+import io
+import urllib.error
+
+
+class _FakeResponse(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        self.close()
+
+
+def _http_error(code, body):
+    return urllib.error.HTTPError("http://ollama/api/chat", code, "Bad Request", {}, io.BytesIO(body))
+
+
+def test_ollama_refus_affiche_la_raison_d_ollama(core, monkeypatch):
+    def urlopen(req, timeout):
+        raise _http_error(400, b'{"error":"the input length exceeds the context length"}')
+    monkeypatch.setattr(core.urllib.request, "urlopen", urlopen)
+    with pytest.raises(core.OllamaError) as e:
+        list(core.ollama_stream("m", []))
+    assert "HTTP 400" in str(e.value) and "exceeds the context length" in str(e.value)
+
+
+def test_ollama_refus_sans_json(core, monkeypatch):
+    def urlopen(req, timeout):
+        raise _http_error(400, b"texte brut")
+    monkeypatch.setattr(core.urllib.request, "urlopen", urlopen)
+    with pytest.raises(core.OllamaError, match="texte brut"):
+        list(core.ollama_stream("m", []))
+
+
+def test_ollama_delai_reglable(core, monkeypatch):
+    seen = {}
+
+    def urlopen(req, timeout):
+        seen["timeout"] = timeout
+        raise TimeoutError()
+    monkeypatch.setattr(core.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(core, "OLLAMA_TIMEOUT", 900)
+    with pytest.raises(core.OllamaError, match="900 s"):
+        list(core.ollama_stream("m", []))
+    assert seen["timeout"] == 900
+
+
+def test_ollama_delai_par_defaut(core):
+    assert core.OLLAMA_TIMEOUT == 300
+
+
+def test_ollama_flux_normal_et_erreur_en_route(core, monkeypatch):
+    lines = b'{"message":{"content":"## Contexte"}}\n\n{"message":{"content":" ok"},"done":true}\n'
+    monkeypatch.setattr(core.urllib.request, "urlopen", lambda req, timeout: _FakeResponse(lines))
+    assert "".join(core.ollama_stream("m", [])) == "## Contexte ok"
+    monkeypatch.setattr(core.urllib.request, "urlopen",
+                        lambda req, timeout: _FakeResponse(b'{"error":"model not found"}\n'))
+    with pytest.raises(core.OllamaError, match="model not found"):
+        list(core.ollama_stream("m", []))
+
+
+def test_tokens_mesure_reelle_qwen3(core):
+    """0.7.1 : un document estimé 5 795 tokens avec l'ancienne règle (4 caractères) en faisait
+    9 935 pour qwen3. La nouvelle estimation doit le bloquer avant Ollama."""
+    texte = "a" * (5795 * 4)
+    assert core.tokens(texte) > core.DOC_BUDGET
+
+
+def test_demarrage_recompte_les_tokens_des_documents(core):
+    core.init_db()
+    secs = [{"title": "A", "text": "a" * 100, "on": True}, {"title": "B", "text": "b" * 50, "on": False}]
+    with core.db() as con:
+        doc_id = con.execute(
+            "INSERT INTO documents(name, date, status, markdown, sections, tokens, tokens_full) "
+            "VALUES ('x', 'd', 'prêt', ?, ?, 25, 38)", ("m" * 150, json.dumps(secs))).lastrowid
+        core.migrate(con)
+        r = con.execute("SELECT tokens, tokens_full FROM documents WHERE id=?", (doc_id,)).fetchone()
+    assert (r["tokens"], r["tokens_full"]) == (40, 60)
