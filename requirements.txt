@@ -3,5 +3,6 @@ uvicorn==0.54.0
 python-multipart==0.0.33
 markitdown[pdf,docx,pptx,xlsx,xls,outlook]==0.1.9
 trafilatura==2.3.1
+youtube-transcript-api==1.2.4
 pymupdf4llm==2.1
 cryptography>=44

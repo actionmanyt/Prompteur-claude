@@ -160,3 +160,78 @@ def test_url_page_web(monkeypatch):
     monkeypatch.setattr(convert.trafilatura, "fetch_url", lambda url: "<html>…</html>")
     monkeypatch.setattr(convert.trafilatura, "extract", lambda *a, **k: "# Titre\n\nTexte")
     assert convert.url_to_md("https://exemple.fr/") == ("# Titre\n\nTexte", "Page web")
+
+
+# ---------- Vidéos YouTube ----------
+@pytest.mark.parametrize("url", [
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ", "https://youtube.com/watch?feature=share&v=dQw4w9WgXcQ",
+    "https://m.youtube.com/watch?v=dQw4w9WgXcQ&t=42s", "https://youtu.be/dQw4w9WgXcQ?si=abc",
+    "https://www.youtube.com/shorts/dQw4w9WgXcQ", "https://www.youtube.com/live/dQw4w9WgXcQ",
+    "https://www.youtube.com/embed/dQw4w9WgXcQ", "https://music.youtube.com/watch?v=dQw4w9WgXcQ",
+])
+def test_youtube_id_reconnu(url):
+    assert convert.youtube_id(url) == "dQw4w9WgXcQ"
+
+
+@pytest.mark.parametrize("url", [
+    "https://exemple.fr/watch?v=dQw4w9WgXcQ", "https://www.youtube.com/@chaine",
+    "https://www.youtube.com/watch?v=court", "https://youtu.be/dQw4w9WgXcQtrop",
+])
+def test_youtube_id_refuse(url):
+    assert convert.youtube_id(url) is None
+
+
+class FakeSnippet:
+    def __init__(self, text, start, duration=4.0):
+        self.text, self.start, self.duration = text, start, duration
+
+
+class FakeTranscript:
+    language, is_generated = "Français", True
+
+    def __init__(self, snippets):
+        self.snippets = snippets
+
+
+def test_youtube_en_sections_de_5_minutes(monkeypatch):
+    snips = [FakeSnippet("[Musique]", 0), FakeSnippet("Bonjour\nà tous", 1),
+             FakeSnippet("deuxième partie", 310), FakeSnippet("fin ♪", 650, 10)]
+    monkeypatch.setattr(convert, "_yt_transcript", lambda vid: FakeTranscript(snips))
+    monkeypatch.setattr(convert, "_yt_title", lambda vid: "Ma vidéo")
+    text, kind = convert.url_to_md("https://youtu.be/dQw4w9WgXcQ")
+    assert kind == "Vidéo YouTube"
+    assert text.startswith("# Ma vidéo\n")
+    assert "- Durée : 11:00" in text and "générés automatiquement" in text
+    assert "Musique" not in text and "♪" not in text and "Bonjour à tous" in text
+    titles = [s["title"] for s in convert.split_sections(text)]
+    assert titles == ["Ma vidéo", "0:00 – 5:00", "5:00 – 10:00", "10:00 – 11:00"]
+
+
+def test_youtube_sans_paroles(monkeypatch):
+    monkeypatch.setattr(convert, "_yt_transcript", lambda vid: FakeTranscript([FakeSnippet("[Music]", 0)]))
+    with pytest.raises(convert.NotSupported, match="sous-titres"):
+        convert.youtube_to_md("dQw4w9WgXcQ")
+
+
+@pytest.mark.parametrize("err, message", [
+    ("TranscriptsDisabled", "pas de sous-titres"), ("VideoUnavailable", "indisponible"),
+    ("RequestBlocked", "refuse la demande"), ("AgeRestricted", "adultes"),
+])
+def test_youtube_erreurs_traduites(monkeypatch, err, message):
+    yta = pytest.importorskip("youtube_transcript_api")
+    exc = getattr(yta, err)
+
+    class Api:
+        def fetch(self, video_id, languages):
+            raise exc.__new__(exc)  # sans passer par le constructeur (le message importe peu)
+
+    monkeypatch.setattr(yta, "YouTubeTranscriptApi", Api)
+    with pytest.raises(convert.NotSupported, match=message):
+        convert._yt_transcript("dQw4w9WgXcQ")
+
+
+def test_youtube_titre_par_defaut(monkeypatch):
+    def offline(*a, **k):
+        raise OSError("hors ligne")
+    monkeypatch.setattr(convert.urllib.request, "urlopen", offline)
+    assert convert._yt_title("dQw4w9WgXcQ") == "Vidéo YouTube dQw4w9WgXcQ"

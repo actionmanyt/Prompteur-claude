@@ -1,9 +1,11 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 """Conversion des fichiers et des pages web en Markdown allégé, puis découpage en sections."""
 import email
+import json
 import os
 import re
 import tempfile
+import urllib.parse
 import urllib.request
 import zipfile
 from email import policy
@@ -132,8 +134,86 @@ def file_to_md(path: str, name: str) -> tuple[str, bool]:
     return text, ext not in KEEP_TAIL
 
 
+# ---------- Vidéos YouTube ----------
+YT_ID = re.compile(
+    r"^https?://(?:(?:www|m|music)\.)?(?:youtube\.com/(?:watch\?(?:.*&)?v=|shorts/|live/|embed/)"
+    r"|youtube-nocookie\.com/embed/|youtu\.be/)([A-Za-z0-9_-]{11})(?![A-Za-z0-9_-])", re.I)
+YT_LANGS = ["fr", "en"]  # langues préférées des sous-titres, dans l'ordre
+YT_BLOCK = 300  # une section toutes les 5 minutes
+YT_NOISE = re.compile(r"\[(?:musique|music|applaudissements|applause|rires|laughter|__)\]|♪", re.I)
+
+
+def youtube_id(url: str) -> str | None:
+    m = YT_ID.match(url.strip())
+    return m.group(1) if m else None
+
+
+def _hms(seconds: float) -> str:
+    s = int(seconds)
+    h, m = divmod(s // 60, 60)
+    return f"{h}:{m:02d}:{s % 60:02d}" if h else f"{m}:{s % 60:02d}"
+
+
+def _yt_title(video_id: str) -> str:
+    """Titre par l'oEmbed public de YouTube (sans clé). En cas d'échec, titre par défaut."""
+    q = urllib.parse.urlencode({"url": f"https://www.youtube.com/watch?v={video_id}", "format": "json"})
+    try:
+        req = urllib.request.Request(f"https://www.youtube.com/oembed?{q}", headers={"User-Agent": UA})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return (json.loads(r.read(100_000)).get("title") or "").strip() or f"Vidéo YouTube {video_id}"
+    except Exception:
+        return f"Vidéo YouTube {video_id}"
+
+
+def _yt_transcript(video_id: str):
+    """Sous-titres en français ou en anglais, sinon dans la première langue disponible."""
+    import youtube_transcript_api as yta
+    api = yta.YouTubeTranscriptApi()
+    try:
+        try:
+            return api.fetch(video_id, languages=YT_LANGS)
+        except yta.NoTranscriptFound:
+            return next(iter(api.list(video_id))).fetch()
+    except (yta.TranscriptsDisabled, yta.NoTranscriptFound, StopIteration) as e:
+        raise NotSupported("cette vidéo n'a pas de sous-titres") from e
+    except (yta.VideoUnavailable, yta.VideoUnplayable, yta.InvalidVideoId) as e:
+        raise NotSupported("vidéo introuvable, privée ou indisponible") from e
+    except yta.AgeRestricted as e:
+        raise NotSupported("vidéo réservée aux adultes : sous-titres inaccessibles") from e
+    except (yta.RequestBlocked, yta.IpBlocked) as e:
+        raise NotSupported("YouTube refuse la demande depuis ce réseau, réessayez plus tard") from e
+    except yta.YouTubeTranscriptApiException as e:
+        raise NotSupported("impossible de récupérer les sous-titres de cette vidéo") from e
+
+
+def youtube_to_md(video_id: str) -> str:
+    """Titre, durée, puis transcription en sections de 5 minutes (sans mots-clés ni description)."""
+    tr = _yt_transcript(video_id)
+    blocks: dict[int, list[str]] = {}
+    end = 0.0
+    for s in tr.snippets:
+        text = YT_NOISE.sub("", s.text.replace("\n", " ")).strip()
+        end = max(end, s.start + s.duration)
+        if text:
+            blocks.setdefault(int(s.start // YT_BLOCK), []).append(text)
+    if not blocks:
+        raise NotSupported("cette vidéo n'a pas de sous-titres")
+    lang = tr.language + (", générés automatiquement" if tr.is_generated else "")
+    out = [f"# {_yt_title(video_id)}", "",
+           f"- Vidéo : https://www.youtube.com/watch?v={video_id}",
+           f"- Durée : {_hms(end)}", f"- Sous-titres : {lang}"]
+    for k in sorted(blocks):
+        a, b = k * YT_BLOCK, min((k + 1) * YT_BLOCK, end)
+        body = re.sub(r"\s{2,}", " ", " ".join(blocks[k]))
+        out += ["", f"## {_hms(a)} – {_hms(b)}", "", body]
+    return "\n".join(out)
+
+
 def url_to_md(url: str) -> tuple[str, str]:
     """Renvoie (markdown, type)."""
+    video_id = youtube_id(url)
+    if video_id:
+        return youtube_to_md(video_id), "Vidéo YouTube"
     if url.lower().split("?")[0].endswith(".pdf"):
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         with urllib.request.urlopen(req, timeout=60) as r:

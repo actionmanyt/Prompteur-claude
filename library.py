@@ -9,7 +9,7 @@ from fastapi import APIRouter, BackgroundTasks, File, UploadFile
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from convert import NotSupported, clean, file_to_md, split_sections, type_label, url_to_md
+from convert import NotSupported, clean, file_to_md, split_sections, type_label, url_to_md, youtube_id
 from core import TMP_DIR, db, now_iso, tokens
 
 router = APIRouter(prefix="/api")
@@ -66,6 +66,8 @@ def convert_url_job(doc_id: int, url: str):
         text, kind = url_to_md(url)
         with db() as con:
             con.execute("UPDATE documents SET type=? WHERE id=?", (kind, doc_id))
+            if kind == "Vidéo YouTube":  # le titre de la vidéo remplace l'adresse
+                con.execute("UPDATE documents SET name=? WHERE id=?", (text.split("\n", 1)[0][2:122], doc_id))
         save_conversion(doc_id, text, True)
     except Exception as e:
         mark_failed(doc_id, e)
@@ -116,9 +118,12 @@ def add_url(body: UrlIn, bg: BackgroundTasks):
     if p.scheme not in ("http", "https") or not p.netloc:
         return JSONResponse({"error": "Adresse invalide (elle doit commencer par https://)."}, 400)
     name = (p.netloc + p.path).rstrip("/")[:120]
+    kind = "Page web"
+    if video_id := youtube_id(url):
+        name, kind = f"YouTube {video_id}", "Vidéo YouTube"
     with db() as con:
         cur = con.execute("INSERT INTO documents(name, type, date, size, status, source_url) "
-                          "VALUES (?, 'Page web', ?, 0, 'en cours', ?)", (name, now_iso(), url))
+                          "VALUES (?, ?, ?, 0, 'en cours', ?)", (name, kind, now_iso(), url))
         doc_id = cur.lastrowid
     bg.add_task(convert_url_job, doc_id, url)
     return {"id": doc_id, "name": name}

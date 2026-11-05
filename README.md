@@ -17,7 +17,7 @@ Coller un document entier dans Claude coûte cher en tokens, et un prompt mal or
 
 **Utilisation**
 
-- Bibliothèque de documents par glisser-déposer : PDF, Word, PowerPoint, Excel, HTML, pages web.
+- Bibliothèque de documents par glisser-déposer : PDF, Word, PowerPoint, Excel, HTML, pages web, vidéos YouTube (transcription des sous-titres).
 - Conversion en Markdown allégé, choix des sections à garder, compteur de tokens.
 - Prompt basé sur un ou plusieurs documents, avec un budget de tokens contrôlé pour ne jamais dépasser la mémoire du modèle.
 - À partir de deux documents, le prompt demande de citer la source et de signaler les contradictions.

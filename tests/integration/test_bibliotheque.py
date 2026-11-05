@@ -103,6 +103,15 @@ def test_adresse_bloquee(site, client, monkeypatch):
     assert client.get(f"/api/library/{r.json()['id']}").json()["status"] == "non pris en charge"
 
 
+def test_video_youtube_prend_son_titre(site, client, monkeypatch):
+    text = "# Ma vidéo\n\n- Durée : 3:34\n\n## 0:00 – 3:34\n\nBonjour à tous"
+    monkeypatch.setattr(site.m.library, "url_to_md", lambda url: (text, "Vidéo YouTube"))
+    r = client.post("/api/library/url", json={"url": "https://youtu.be/dQw4w9WgXcQ"})
+    assert r.json()["name"] == "YouTube dQw4w9WgXcQ"
+    d = client.get(f"/api/library/{r.json()['id']}").json()
+    assert d["status"] == "prêt" and d["name"] == "Ma vidéo" and d["type"] == "Vidéo YouTube"
+
+
 # ---------- Modification ----------
 def test_choix_des_sections_recalcule_les_tokens(client):
     doc_id = upload(client, "r.md", MD.encode()).json()[0]["id"]

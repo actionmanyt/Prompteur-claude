@@ -103,6 +103,7 @@ Les identifiants des modèles (`claude-haiku-5-5`, `claude-sonnet-5-5`) peuvent 
 | « Ollama : demande refusée (HTTP …) » | La raison donnée par Ollama suit (0.7.1). Le conteneur joint Ollama, mais Ollama refuse la demande : lire aussi `docker logs <conteneur-ollama> --tail 40` juste après l'erreur |
 | « Ollama : pas de réponse en … s » | Machine sans carte graphique ou document long : augmenter `OLLAMA_TIMEOUT` (secondes, 300 par défaut) dans `.env` ou dans le compose, ou garder moins de sections |
 | « Prompteur injoignable » | `docker exec md-converter python -c "import urllib.request;print(urllib.request.urlopen('http://ia-ollama-1:11434/api/version').read())"` |
+| Vidéo YouTube « refuse la demande depuis ce réseau » | YouTube bloque l'adresse IP (fréquent sur un VPN ou un hébergeur) : réessayer plus tard ; tester `docker exec md-converter python -c "from youtube_transcript_api import YouTubeTranscriptApi as Y;print(len(Y().fetch('dQw4w9WgXcQ').snippets))"` |
 | Document « erreur » | Survol du statut pour le détail ; un redémarrage pendant une conversion demande de renvoyer le fichier |
 | Revenir en arrière | `git log --oneline`, `git checkout <commit> -- .`, `./deploy.sh` ; base : copier un `data/prompteur.db.bak-*` sur `prompteur.db` conteneur arrêté |
 
@@ -124,4 +125,6 @@ Sans carte NVIDIA, Ollama tourne sur le processeur (environ 12 tokens lus par se
 
 ## Formats
 
-Pris en charge : PDF texte, DOCX, PPTX, XLSX, XLS, MSG, EML, HTML, adresses web, TXT, MD, CSV, JSON, XML, YAML, code, EPUB, ZIP (contrôle de taille). Pas encore : DOC, PPT, ODT/ODS/ODP, RTF, images et PDF scannés (OCR), audio et vidéo.
+Pris en charge : PDF texte, DOCX, PPTX, XLSX, XLS, MSG, EML, HTML, adresses web, vidéos YouTube (sous-titres), TXT, MD, CSV, JSON, XML, YAML, code, EPUB, ZIP (contrôle de taille). Pas encore : DOC, PPT, ODT/ODS/ODP, RTF, images et PDF scannés (OCR), audio et vidéo.
+
+**Vidéos YouTube** (`convert.py`, `youtube_to_md`) : un lien `youtube.com/watch`, `youtu.be`, `shorts`, `live` ou `embed` collé dans « Adresse web » donne le titre (oEmbed, sans clé), la durée, la langue des sous-titres et la transcription en sections de 5 minutes, à cocher pour rester sous les 6 992 tokens. Sous-titres demandés : français, puis anglais, sinon la première langue disponible. Mots-clés, description et bruits (`[Musique]`, `♪`) sont retirés. Bibliothèque : `youtube-transcript-api`. Sans sous-titres (vidéo privée, réservée aux adultes, sous-titres désactivés), le document passe en « non pris en charge » avec la raison.
