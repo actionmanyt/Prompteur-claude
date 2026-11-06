@@ -62,9 +62,9 @@ const api = {
   upload: (p, formData) => request("POST", p, formData),
 };
 
-/* Lit une réponse en streaming (une ligne JSON par morceau) */
-async function streamNdjson(path, body, onLine) {
-  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+/* Lit une réponse en streaming (une ligne JSON par morceau). signal : AbortController.signal pour arrêter */
+async function streamNdjson(path, body, onLine, signal) {
+  const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal });
   if (r.status === 401) { location.href = "/login.html"; throw new Error("Non connecté"); }
   if (!r.ok) { let j = {}; try { j = await r.json(); } catch (e) {} throw new Error(j.error || "Erreur " + r.status); }
   const reader = r.body.getReader(), dec = new TextDecoder();

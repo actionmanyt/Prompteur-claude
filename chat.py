@@ -125,6 +125,60 @@ def api_error(e: Exception) -> str:
     return str(e) or type(e).__name__
 
 
+def prepare_claude(uid: int, label: str):
+    """Vérifie le plafond et lit la clé. Renvoie (réponse d'erreur ou None, clé, tarif)."""
+    with db() as con:
+        s = settings_of(con, uid)
+        cost_month, _ = month_usage(con, uid)
+    if s["cap"] and cost_month >= s["cap"]:
+        return JSONResponse({"error": f"Plafond mensuel atteint ({s['cap']} $) : envoi bloqué."}, 402), None, None
+    key = None
+    if s["api_key_enc"]:
+        try:
+            key = decrypt(s["api_key_enc"])
+        except Exception:
+            key = None
+    return None, key, s["prices"].get(label, DEFAULT_PRICES[label])
+
+
+def claude_events(uid: int, label: str, msgs: list, key: str | None, price: dict):
+    """Réponse de Claude (ou d'Ollama en secours), sous forme d'événements {"t"}, {"error"}, puis {"done"}."""
+    state, got_text, reason = {"tin": 0, "tout": 0}, False, ""
+    if key:
+        try:
+            for chunk in claude_stream(key, MODELS[label], msgs, state):
+                got_text = True
+                yield {"t": chunk}
+        except Exception as e:
+            reason = api_error(e)
+            if got_text:
+                yield {"error": f"Réponse coupée : {reason}"}
+    else:
+        reason = "aucune clé API enregistrée"
+    fallback = not got_text
+    if fallback:
+        yield {"t": f"(Réponse de secours d'Ollama / {FALLBACK_MODEL} : {reason}.)\n\n"}
+        out = []
+        try:
+            for chunk in ollama_stream(FALLBACK_MODEL, msgs):
+                out.append(chunk)
+                yield {"t": chunk}
+        except Exception as e:
+            yield {"error": f"Ollama injoignable aussi : {e}"}
+        tin, tout, cost = sum(tokens(m["content"]) for m in msgs), tokens("".join(out)), 0.0
+    else:
+        tin, tout = state["tin"], state["tout"]
+        cost = (tin * float(price["in"]) + tout * float(price["out"])) / 1e6
+        with db() as con:
+            con.execute("INSERT INTO chat_usage(date, user_id, model, tokens_in, tokens_out, cost) "
+                        "VALUES (?,?,?,?,?,?)", (now_iso(), uid, MODELS[label], tin, tout, cost))
+    with db() as con:
+        month_cost, month_tok = month_usage(con, uid)
+    yield {"done": True, "model": FALLBACK_MODEL if fallback else label, "fallback": fallback,
+           "reason": reason, "tokens_in": tin, "tokens_out": tout, "cost": cost,
+           "month_cost": month_cost, "month_tokens": month_tok}
+
+
 @router.post("")
 def chat(body: ChatIn, request: Request):
     uid = request.state.user["id"]
@@ -133,54 +187,9 @@ def chat(body: ChatIn, request: Request):
     msgs = [m for m in msgs if m["role"] in ("user", "assistant") and m["content"]]
     if not msgs or msgs[-1]["role"] != "user":
         return JSONResponse({"error": "Le dernier message doit venir de vous."}, 400)
-    with db() as con:
-        s = settings_of(con, uid)
-        cost_month, _ = month_usage(con, uid)
-    if s["cap"] and cost_month >= s["cap"]:
-        return JSONResponse({"error": f"Plafond mensuel atteint ({s['cap']} $) : envoi bloqué."}, 402)
-    key = None
-    if s["api_key_enc"]:
-        try:
-            key = decrypt(s["api_key_enc"])
-        except Exception:
-            key = None
-    price = s["prices"].get(label, DEFAULT_PRICES[label])
-
-    def stream():
-        state, got_text, reason = {"tin": 0, "tout": 0}, False, ""
-        if key:
-            try:
-                for chunk in claude_stream(key, MODELS[label], msgs, state):
-                    got_text = True
-                    yield ndjson({"t": chunk})
-            except Exception as e:
-                reason = api_error(e)
-                if got_text:
-                    yield ndjson({"error": f"Réponse coupée : {reason}"})
-        else:
-            reason = "aucune clé API enregistrée"
-        fallback = not got_text
-        if fallback:
-            yield ndjson({"t": f"(Réponse de secours d'Ollama / {FALLBACK_MODEL} : {reason}.)\n\n"})
-            out = []
-            try:
-                for chunk in ollama_stream(FALLBACK_MODEL, msgs):
-                    out.append(chunk)
-                    yield ndjson({"t": chunk})
-            except Exception as e:
-                yield ndjson({"error": f"Ollama injoignable aussi : {e}"})
-            tin, tout, cost = sum(tokens(m["content"]) for m in msgs), tokens("".join(out)), 0.0
-        else:
-            tin, tout = state["tin"], state["tout"]
-            cost = (tin * float(price["in"]) + tout * float(price["out"])) / 1e6
-            with db() as con:
-                con.execute("INSERT INTO chat_usage(date, user_id, model, tokens_in, tokens_out, cost) "
-                            "VALUES (?,?,?,?,?,?)", (now_iso(), uid, MODELS[label], tin, tout, cost))
-        with db() as con:
-            month_cost, month_tok = month_usage(con, uid)
-        yield ndjson({"done": True, "model": FALLBACK_MODEL if fallback else label, "fallback": fallback,
-                      "reason": reason, "tokens_in": tin, "tokens_out": tout, "cost": cost,
-                      "month_cost": month_cost, "month_tokens": month_tok})
-
-    return StreamingResponse(stream(), media_type="application/x-ndjson",
+    err, key, price = prepare_claude(uid, label)
+    if err:
+        return err
+    return StreamingResponse((ndjson(e) for e in claude_events(uid, label, msgs, key, price)),
+                             media_type="application/x-ndjson",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})

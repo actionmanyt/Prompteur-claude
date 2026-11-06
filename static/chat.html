@@ -3,187 +3,465 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Tchat Claude · Prompteur Claude</title>
+<title>Tchat · Prompteur Claude</title>
 <meta name="theme-color" content="#0b2420">
 <link rel="stylesheet" href="style.css">
 <script src="common.js"></script>
 </head>
-<body>
+<body class="app-page">
 <header>
   <nav class="nav">
     <div class="logo"><a href="index.html">Prompteur Claude</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
     <ul id="menu">
       <li><a href="index.html">Utilisation</a></li>
-      <li><a href="chat.html">Tchat Claude</a></li>
+      <li><a href="chat.html">Tchat</a></li>
+      <li><a href="ia.html">Mes IA</a></li>
     </ul>
   </nav>
 </header>
 
-<main class="main">
-  <div class="page-header">
-    <h1>Tchat Claude</h1>
-    <p>Envoi direct d'un prompt à l'API Claude avec votre clé, compteur de coût et plafond. Ollama répond en secours si l'API ne répond pas.</p>
-  </div>
+<div class="app">
+  <!-- Conversations -->
+  <aside class="side" id="side">
+    <button class="btn primary" id="new-conv">＋ Nouvelle conversation</button>
+    <input id="conv-filter" type="search" placeholder="Rechercher…" aria-label="Rechercher une conversation">
+    <div class="conv-list" id="conv-list"></div>
+    <div class="side-foot">
+      <a href="ia.html">🧠 Mes IA (rôles et documents)</a>
+      <a href="#" id="open-claude">⚙ Réglages Claude (clé, plafond)</a>
+      <a href="https://github.com/actionmanyt/Prompteur-claude">Code source (AGPL-3.0)</a>
+    </div>
+  </aside>
 
-  <!-- 3.2 Compteur de coût -->
-  <h2><span class="num">3.2</span>Compteur de coût</h2>
-  <div class="grid">
-    <div class="card"><div class="muted">Dernier message</div><div class="stat" id="k-last">0,000 <small>$</small></div><div class="muted" id="k-last-tok">–</div></div>
-    <div class="card"><div class="muted">Cumul du mois</div><div class="stat" id="k-month">0,00 <small>$</small></div><div class="bar"><span id="k-bar"></span></div><div class="muted" id="k-cap"></div></div>
-    <div class="card"><div class="muted">Tokens ce mois</div><div class="stat" id="k-tok">0</div><div class="muted">entrée + sortie</div></div>
-  </div>
+  <!-- Fil -->
+  <section class="pane">
+    <div class="topbar">
+      <button class="icon-btn" id="side-toggle" title="Conversations">☰</button>
+      <select id="target" aria-label="Modèle ou IA"></select>
+      <span class="pill" id="target-info" hidden></span>
+      <span style="flex:1"></span>
+      <span class="pill" id="cost-pill" hidden title="Coût Claude ce mois"></span>
+    </div>
 
-  <!-- 3.1 / 3.3 Fil de conversation -->
-  <h2><span class="num">3.1</span>Envoi direct et fil de conversation</h2>
-  <div class="card">
-    <div class="row" style="justify-content:space-between; margin-bottom:12px">
-      <select id="model" style="width:auto">
-        <option value="haiku">Claude Haiku (économique)</option>
-        <option value="sonnet">Claude Sonnet (qualité)</option>
-      </select>
-      <div class="row">
-        <button class="btn" id="clear">Nouvelle conversation</button>
+    <div class="thread" id="thread"><div class="thread-in" id="thread-in"></div></div>
+
+    <div class="composer-wrap">
+      <div class="composer">
+        <div class="chips" id="chips"></div>
+        <textarea id="msg" rows="1" placeholder="Écrivez votre message… (Entrée pour envoyer, Maj+Entrée pour aller à la ligne)"></textarea>
+        <div class="row">
+          <button class="icon-btn" id="attach" title="Joindre des documents de la bibliothèque">📎 Documents</button>
+          <button class="icon-btn" id="structure" title="Mettre le message au format Contexte / Tâche / Contraintes / Format">✨ Structurer</button>
+          <span style="flex:1"></span>
+          <span class="muted" id="est" style="font-size:12px"></span>
+          <button class="send-btn" id="send" title="Envoyer" disabled>↑</button>
+        </div>
       </div>
+      <p class="hint" id="hint">Les IA locales peuvent se tromper : vérifiez les informations importantes.</p>
     </div>
-    <div class="chat" id="chat"><p class="muted" style="margin:0">Aucun message. Collez un prompt ou venez de la page Utilisation.</p></div>
-    <label for="msg">Message</label>
-    <textarea id="msg" placeholder="Collez votre prompt…"></textarea>
-    <div class="row" style="margin-top:12px">
-      <button class="btn primary" id="send">Envoyer à Claude</button>
-      <span class="muted" id="est"></span>
-    </div>
-  </div>
+  </section>
+</div>
 
-  <!-- 3.4 Réglages API -->
-  <h2><span class="num">3.4</span>Réglages API</h2>
-  <div class="card">
-    <label for="key" style="margin-top:0">Votre clé API Anthropic</label>
-    <div class="row">
-      <input id="key" type="password" autocomplete="off" placeholder="sk-ant-…" style="flex:1; min-width:200px">
-      <button class="btn" id="key-del" hidden>Supprimer la clé</button>
-    </div>
-    <p class="muted" style="margin:4px 0 0">Stockée chiffrée sur le serveur, propre à votre compte, jamais réaffichée. État : <span class="status err" id="key-state">aucune clé</span></p>
-    <div class="grid" style="margin-top:8px">
-      <div><label for="cap">Plafond mensuel ($, 0 = aucun)</label><input id="cap" type="number" min="0" step="1" value="5"></div>
-      <div><label for="default-model">Modèle par défaut</label>
-        <select id="default-model"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option></select></div>
-    </div>
-    <p class="muted">Tarifs utilisés pour le coût ($ par million de tokens, entrée / sortie) — à vérifier sur la page des tarifs d'Anthropic. Modèles : <span class="mono" id="model-ids"></span></p>
-    <div class="grid">
-      <div><label>Haiku entrée / sortie</label><div class="row"><input id="p-h-in" type="number" step="0.01" value="1" style="flex:1"><input id="p-h-out" type="number" step="0.01" value="5" style="flex:1"></div></div>
-      <div><label>Sonnet entrée / sortie</label><div class="row"><input id="p-s-in" type="number" step="0.01" value="3" style="flex:1"><input id="p-s-out" type="number" step="0.01" value="15" style="flex:1"></div></div>
-    </div>
-    <div class="row" style="margin-top:16px"><button class="btn primary" id="save">Enregistrer</button></div>
-  </div>
-</main>
+<!-- Documents joints -->
+<dialog id="docs-dlg">
+  <h3 style="margin-top:0">Documents joints à la conversation</h3>
+  <p class="muted">Les extraits les plus proches de chaque question sont ajoutés au message. Documents de la bibliothèque (page Utilisation).</p>
+  <div class="doc-pick" id="doc-pick"></div>
+  <label for="doc-upload">Ajouter un fichier à la bibliothèque</label>
+  <input id="doc-upload" type="file" multiple>
+  <div class="row" style="margin-top:16px"><span style="flex:1"></span><button class="btn primary" id="docs-ok">OK</button></div>
+</dialog>
 
-<footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a> · <a href="https://github.com/actionmanyt/Prompteur-claude">Code source (AGPL-3.0)</a></footer>
+<!-- Réglages Claude (repris de l'ancienne page) -->
+<dialog id="claude-dlg">
+  <h3 style="margin-top:0">Réglages Claude</h3>
+  <div class="grid">
+    <div><div class="muted">Dernier message</div><div class="stat" id="k-last">0,000 <small>$</small></div><div class="muted" id="k-last-tok">–</div></div>
+    <div><div class="muted">Cumul du mois</div><div class="stat" id="k-month">0,00 <small>$</small></div><div class="bar"><span id="k-bar"></span></div><div class="muted" id="k-cap"></div></div>
+    <div><div class="muted">Tokens ce mois</div><div class="stat" id="k-tok">0</div><div class="muted">entrée + sortie</div></div>
+  </div>
+  <label for="key">Votre clé API Anthropic</label>
+  <div class="row">
+    <input id="key" type="password" autocomplete="off" placeholder="sk-ant-…" style="flex:1; min-width:200px">
+    <button class="btn" id="key-del" hidden>Supprimer la clé</button>
+  </div>
+  <p class="muted" style="margin:4px 0 0">Stockée chiffrée sur le serveur, propre à votre compte, jamais réaffichée. État : <span class="status err" id="key-state">aucune clé</span></p>
+  <div class="grid" style="margin-top:8px">
+    <div><label for="cap">Plafond mensuel ($, 0 = aucun)</label><input id="cap" type="number" min="0" step="1" value="5"></div>
+    <div><label for="default-model">Modèle Claude par défaut</label>
+      <select id="default-model"><option value="haiku">Haiku</option><option value="sonnet">Sonnet</option></select></div>
+  </div>
+  <p class="muted">Tarifs ($ par million de tokens, entrée / sortie), à vérifier sur la page des tarifs d'Anthropic. Modèles : <span class="mono" id="model-ids"></span></p>
+  <div class="grid">
+    <div><label>Haiku entrée / sortie</label><div class="row"><input id="p-h-in" type="number" step="0.01" value="1" style="flex:1"><input id="p-h-out" type="number" step="0.01" value="5" style="flex:1"></div></div>
+    <div><label>Sonnet entrée / sortie</label><div class="row"><input id="p-s-in" type="number" step="0.01" value="3" style="flex:1"><input id="p-s-out" type="number" step="0.01" value="15" style="flex:1"></div></div>
+  </div>
+  <div class="row" style="margin-top:16px">
+    <button class="btn primary" id="save">Enregistrer</button><span style="flex:1"></span><button class="btn" id="claude-close">Fermer</button>
+  </div>
+</dialog>
 
 <script>
-let thread = [], month = { cost: 0, tokens: 0 };
-const THREAD_KEY = "prompteur-thread";
-const saveThread = () => { try { sessionStorage.setItem(THREAD_KEY, JSON.stringify(thread)); } catch (e) {} };
-try { thread = JSON.parse(sessionStorage.getItem(THREAD_KEY) || "[]"); } catch (e) { thread = []; }
-
-const price = (m) => m === "sonnet"
-  ? { in: +$("#p-s-in").value, out: +$("#p-s-out").value }
-  : { in: +$("#p-h-in").value, out: +$("#p-h-out").value };
+/* ---------- État ---------- */
+const S = {
+  models: null, convs: [], conv: null,   // conv : { id, title, target, doc_ids, messages }
+  docIds: [], library: [], busy: false, ctrl: null, month: { cost: 0, tokens: 0 }, settings: null,
+};
+const TARGET_KEY = "ia-target";
 const money = (v, d = 2) => (+v || 0).toLocaleString("fr-FR", { minimumFractionDigits: d, maximumFractionDigits: d });
 
+/* ---------- Markdown (sans bibliothèque externe, le texte est échappé d'abord) ---------- */
+function inline(s) {
+  const codes = [];
+  s = s.replace(/`([^`]+)`/g, (_, c) => `\u0000${codes.push(c) - 1}\u0000`);
+  s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[^*\w])\*([^*\s][^*]*?)\*(?!\w)/g, "$1<em>$2</em>")
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[(\d{1,2})\](?!\()/g, '<sup class="cite" data-n="$1">[$1]</sup>');
+  return s.replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${codes[+i]}</code>`);
+}
+function md(src) {
+  const L = esc(src).split("\n"), out = [];
+  const isBlock = (l) => /^```|^#{1,6} |^\s*([-*+]|\d+[.)]) |^&gt; ?|^\s*\|.*\|\s*$/.test(l);
+  for (let i = 0; i < L.length;) {
+    const l = L[i];
+    if (/^```/.test(l)) {
+      const buf = []; i++;
+      while (i < L.length && !/^```/.test(L[i])) buf.push(L[i++]);
+      i++; out.push(`<pre><code>${buf.join("\n")}</code></pre>`); continue;
+    }
+    if (/^#{1,6} /.test(l)) { const n = Math.min(4, l.match(/^#+/)[0].length); out.push(`<h${n}>${inline(l.replace(/^#+ /, ""))}</h${n}>`); i++; continue; }
+    if (/^\s*\|.*\|\s*$/.test(l) && /^\s*\|?\s*:?-{3,}/.test(L[i + 1] || "")) {
+      const cells = (r) => r.trim().replace(/^\||\|$/g, "").split("|").map((c) => inline(c.trim()));
+      const head = cells(l); i += 2; const rows = [];
+      while (i < L.length && /^\s*\|.*\|\s*$/.test(L[i])) rows.push(cells(L[i++]));
+      out.push(`<div class="table-wrap"><table><thead><tr>${head.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${c}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
+      continue;
+    }
+    if (/^\s*([-*+]|\d+[.)]) /.test(l)) {
+      const ordered = /^\s*\d/.test(l), items = [];
+      while (i < L.length && (/^\s*([-*+]|\d+[.)]) /.test(L[i]) || (/^\s{2,}\S/.test(L[i]) && items.length))) {
+        if (/^\s*([-*+]|\d+[.)]) /.test(L[i])) items.push(L[i].replace(/^\s*([-*+]|\d+[.)]) /, ""));
+        else items[items.length - 1] += " " + L[i].trim();
+        i++;
+      }
+      const tag = ordered ? "ol" : "ul";
+      out.push(`<${tag}>${items.map((x) => `<li>${inline(x)}</li>`).join("")}</${tag}>`); continue;
+    }
+    if (/^&gt; ?/.test(l)) {
+      const buf = []; while (i < L.length && /^&gt; ?/.test(L[i])) buf.push(L[i++].replace(/^&gt; ?/, ""));
+      out.push(`<blockquote>${inline(buf.join("<br>"))}</blockquote>`); continue;
+    }
+    if (!l.trim()) { i++; continue; }
+    const buf = []; while (i < L.length && L[i].trim() && !(buf.length && isBlock(L[i]))) buf.push(L[i++]);
+    out.push(`<p>${inline(buf.join("<br>"))}</p>`);
+  }
+  return out.join("");
+}
+
+/* ---------- Modèles et IA ---------- */
+function targetLabel(t) {
+  const [kind, ...rest] = t.split(":"), v = rest.join(":");
+  if (kind === "agent") { const a = (S.models?.agents || []).find((x) => String(x.id) === v); return a ? a.name : "IA supprimée"; }
+  return kind === "claude" ? "Claude " + v : v;
+}
+function fillTargets(selected) {
+  const m = S.models, sel = $("#target");
+  const opt = (v, l) => `<option value="${esc(v)}">${esc(l)}</option>`;
+  let html = "";
+  if (m.agents.length) html += `<optgroup label="Mes IA">${m.agents.map((a) => opt("agent:" + a.id, `🧠 ${a.name}`)).join("")}</optgroup>`;
+  html += `<optgroup label="Ollama (local, gratuit)">${m.ollama.length ? m.ollama.map((o) => opt("ollama:" + o.name, o.name + (o.params ? ` · ${o.params}` : ""))).join("") : `<option disabled>${esc(m.ollama_error ? "Ollama injoignable" : "aucun modèle")}</option>`}</optgroup>`;
+  html += `<optgroup label="Claude (votre clé API)">${m.claude.map((c) => opt("claude:" + c, `Claude ${c[0].toUpperCase() + c.slice(1)}${m.has_key ? "" : " (sans clé : Ollama en secours)"}`)).join("")}</optgroup>`;
+  sel.innerHTML = html;
+  // Cible demandée, sinon gardée d'une conversation, sinon la dernière utilisée, sinon un modèle local
+  const all = [...sel.options].filter((o) => !o.disabled).map((o) => o.value);
+  let want = selected;
+  if (!all.includes(want)) { try { want = localStorage.getItem(TARGET_KEY); } catch (e) {} }
+  if (!all.includes(want)) want = all.find((v) => v.startsWith("ollama:qwen3")) || all.find((v) => v.startsWith("ollama:")) || all[0];
+  if (want && !all.includes(want)) { sel.insertAdjacentHTML("afterbegin", opt(want, targetLabel(want) + " (indisponible)")); }
+  sel.value = want;
+  onTarget();
+}
+function onTarget() {
+  const t = $("#target").value || "", isClaude = t.startsWith("claude:");
+  try { localStorage.setItem(TARGET_KEY, t); } catch (e) {}
+  $("#cost-pill").hidden = !isClaude;
+  const info = $("#target-info");
+  if (t.startsWith("agent:")) {
+    const a = S.models.agents.find((x) => "agent:" + x.id === t);
+    info.hidden = !a; if (a) { info.textContent = `${a.base_model}`; info.title = "Modèle de base de cette IA"; }
+  } else info.hidden = true;
+  $("#hint").textContent = isClaude
+    ? "Claude est facturé sur votre clé API (plafond dans les réglages). Sans clé, Ollama répond en secours."
+    : "Les IA locales peuvent se tromper : vérifiez les informations importantes.";
+  estimate();
+}
+
+/* ---------- Conversations ---------- */
+function groupOf(iso) {
+  const d = (Date.now() - new Date(iso)) / 864e5;
+  return d < 1 ? "Aujourd'hui" : d < 7 ? "7 derniers jours" : d < 31 ? "30 derniers jours" : "Plus ancien";
+}
+function renderConvs() {
+  const f = $("#conv-filter").value.trim().toLowerCase();
+  let last = "", html = "";
+  for (const c of S.convs.filter((c) => !f || c.title.toLowerCase().includes(f))) {
+    const g = groupOf(c.updated);
+    if (g !== last) { html += `<div class="conv-group">${g}</div>`; last = g; }
+    html += `<div class="conv-item ${S.conv && S.conv.id === c.id ? "active" : ""}" data-id="${c.id}" title="${esc(targetLabel(c.target))}">
+      <span class="t">${esc(c.title)}</span><button data-act="ren" title="Renommer">✎</button><button data-act="del" title="Supprimer">🗑</button></div>`;
+  }
+  $("#conv-list").innerHTML = html || `<p class="muted" style="padding:8px 10px">Aucune conversation.</p>`;
+}
+async function loadConvs() { try { S.convs = await api.get("/api/ia/conversations"); } catch (e) { toast(e.message); } renderConvs(); }
+async function openConv(id) {
+  try {
+    const c = await api.get("/api/ia/conversations/" + id);
+    S.conv = c; S.docIds = c.doc_ids;
+    fillTargets(c.target); renderThread(); renderChips(); renderConvs();
+    history.replaceState(null, "", "?c=" + id);
+  } catch (e) { toast(e.message); }
+  $("#side").classList.remove("open");
+}
+function newConv() {
+  if (S.busy) return;
+  S.conv = null; S.docIds = []; renderThread(); renderChips(); renderConvs();
+  history.replaceState(null, "", location.pathname); $("#msg").focus(); $("#side").classList.remove("open");
+}
+
+/* ---------- Fil ---------- */
+function metaLine(m) {
+  const x = m.meta || {}, parts = [];
+  if (x.model) parts.push(esc(x.model));
+  if (x.fallback) parts.push("secours Ollama");
+  if (x.tokens_in != null) parts.push(`${x.tokens_in} + ${x.tokens_out} tokens`);
+  if (x.cost) parts.push(`${money(x.cost, 4)} $`);
+  if (x.duration_s) parts.push(`${String(x.duration_s).replace(".", ",")} s`);
+  if (x.search) parts.push(`recherche par ${x.search}`);
+  return parts.join(" · ");
+}
+function sourcesHtml(m) {
+  const s = (m.meta || {}).sources || [];
+  if (!s.length) return "";
+  return `<details class="sources"><summary>${s.length} extrait${s.length > 1 ? "s" : ""} utilisé${s.length > 1 ? "s" : ""}</summary><ol>${s.map((x) =>
+    `<li><b>${esc(x.doc)}</b> › ${esc(x.title)}<br><span>${esc(x.excerpt)}…</span></li>`).join("")}</ol></details>`;
+}
+function messageHtml(m, i, lastBot) {
+  if (m.role === "user") return `<div class="bubble">${esc(m.content)}</div>`;
+  const err = (m.meta || {}).error;
+  return `<div class="bot" data-i="${i}"><div class="answer ${m.typing ? "typing" : ""}">${md(m.content)}${err ? `<p class="err">⚠ ${esc(err)}</p>` : ""}</div>
+    ${m.typing ? "" : `<div class="msg-tools"><button class="icon-btn" data-act="copy" data-i="${i}" title="Copier">⧉ Copier</button>${lastBot ? `<button class="icon-btn" data-act="regen" title="Régénérer">↻ Régénérer</button>` : ""}<span>${metaLine(m)}</span></div>${sourcesHtml(m)}`}</div>`;
+}
+function renderThread() {
+  const msgs = S.conv ? S.conv.messages : [];
+  const lastBot = msgs.length - 1;
+  $("#thread-in").innerHTML = msgs.length ? msgs.map((m, i) => messageHtml(m, i, i === lastBot && m.role === "assistant" && !S.busy)).join("")
+    : `<div class="welcome"><h2>Bonjour${ME ? " " + esc(ME.username) : ""} 👋</h2>
+       <p class="muted">Choisissez une de vos IA, un modèle Ollama ou Claude en haut, puis posez votre question.
+       Joignez des documents avec 📎, ou mettez une idée au format Contexte / Tâche / Contraintes / Format avec ✨.</p></div>`;
+  citeTitles();
+  scrollEnd();
+}
+function citeTitles() {
+  document.querySelectorAll(".bot").forEach((el) => {
+    const m = S.conv?.messages[+el.dataset.i]; const src = (m?.meta || {}).sources || [];
+    el.querySelectorAll("sup.cite").forEach((s) => { const x = src[+s.dataset.n - 1]; if (x) s.title = `${x.doc} › ${x.title}`; });
+  });
+}
+const scrollEnd = () => { const t = $("#thread"); t.scrollTop = t.scrollHeight; };
+let raf = 0;
+function updateLast() { // pendant le streaming : seul le dernier message est redessiné
+  if (raf) return;
+  raf = requestAnimationFrame(() => {
+    raf = 0;
+    const msgs = S.conv.messages, i = msgs.length - 1, el = $(`.bot[data-i="${i}"]`);
+    const nearEnd = $("#thread").scrollHeight - $("#thread").scrollTop - $("#thread").clientHeight < 120;
+    if (el) el.outerHTML = messageHtml(msgs[i], i, false); else renderThread();
+    if (nearEnd) scrollEnd();
+  });
+}
+
+/* ---------- Envoi ---------- */
+function estimate() {
+  const t = $("#msg").value, n = tokens(t) + (S.conv ? S.conv.messages.reduce((s, m) => s + tokens(m.content), 0) : 0);
+  $("#est").textContent = t.trim() ? `≈ ${n} tokens` : "";
+  $("#send").disabled = !S.busy && !t.trim();
+}
+function setBusy(b) {
+  S.busy = b;
+  $("#send").textContent = b ? "■" : "↑"; $("#send").title = b ? "Arrêter" : "Envoyer";
+  $("#structure").disabled = b; estimate();
+}
+async function send(regenerate = false) {
+  if (S.busy) { S.ctrl?.abort(); return; }
+  const text = $("#msg").value.trim();
+  if (!regenerate && !text) return;
+  const target = $("#target").value;
+  if (!S.conv) S.conv = { id: null, title: text.slice(0, 60), target, doc_ids: S.docIds, messages: [] };
+  if (regenerate) { if (S.conv.messages.at(-1)?.role === "assistant") S.conv.messages.pop(); }
+  else { S.conv.messages.push({ role: "user", content: text }); $("#msg").value = ""; autosize(); }
+  const bot = { role: "assistant", content: "", meta: {}, typing: true };
+  S.conv.messages.push(bot); setBusy(true); renderThread();
+  S.ctrl = new AbortController();
+  try {
+    await streamNdjson("/api/ia/chat", { target, message: text, conversation_id: S.conv.id, doc_ids: S.docIds, regenerate }, (m) => {
+      if (m.conversation_id && !S.conv.id) { S.conv.id = m.conversation_id; S.conv.title = m.title; history.replaceState(null, "", "?c=" + m.conversation_id); }
+      if (m.sources) bot.meta.sources = m.sources;
+      if (m.t) { bot.content += m.t; updateLast(); }
+      if (m.error) { bot.meta.error = m.error; updateLast(); }
+      if (m.done) {
+        bot.meta = { ...bot.meta, ...m };
+        if (m.month_cost != null) { S.month = { cost: m.month_cost, tokens: m.month_tokens }; renderCost({ cost: m.cost, tin: m.tokens_in, tout: m.tokens_out, model: m.model }); }
+      }
+    }, S.ctrl.signal);
+  } catch (e) {
+    if (e.name === "AbortError") bot.meta.error = "Réponse arrêtée.";
+    else { bot.meta.error = e.message; if (!S.conv.id && !regenerate) { S.conv.messages.pop(); S.conv.messages.pop(); $("#msg").value = text; } }
+  }
+  bot.typing = false; setBusy(false);
+  if (S.conv.id && bot.meta.error === "Réponse arrêtée.") await openConv(S.conv.id); // version enregistrée par le serveur
+  else if (!S.conv.messages.length) S.conv = null;
+  renderThread(); await loadConvs();
+}
+
+/* ---------- Structurer (Prompteur) ---------- */
+async function structure() {
+  const text = $("#msg").value.trim(); if (!text || S.busy) return toast("Écrivez d'abord votre idée");
+  const btn = $("#structure"); btn.disabled = true; btn.textContent = "✨ Structuration…";
+  let out = "";
+  try {
+    await streamNdjson("/api/ia/structure", { text }, (m) => {
+      if (m.t) { out += m.t; $("#msg").value = out; autosize(); }
+      if (m.error) throw new Error(m.error);
+      if (m.done) { $("#msg").value = m.prompt; autosize(); }
+    });
+    toast("Message structuré : relisez-le avant d'envoyer");
+  } catch (e) { $("#msg").value = text; autosize(); toast(e.message); }
+  btn.disabled = false; btn.textContent = "✨ Structurer"; estimate();
+}
+
+/* ---------- Documents joints ---------- */
+function renderChips() {
+  const name = (id) => (S.library.find((d) => d.id === id) || {}).name || `document ${id}`;
+  $("#chips").innerHTML = S.docIds.map((id) => `<span class="chip">📄 ${esc(name(id))}<button data-id="${id}" title="Retirer">✕</button></span>`).join("");
+}
+async function loadLibrary() { try { S.library = await api.get("/api/library"); } catch (e) {} }
+function renderPick() {
+  $("#doc-pick").innerHTML = S.library.length ? S.library.map((d) => {
+    const ok = d.status === "prêt";
+    return `<label><input type="checkbox" value="${d.id}" ${S.docIds.includes(d.id) ? "checked" : ""} ${ok ? "" : "disabled"}>
+      <span style="flex:1">${esc(d.name)}</span><span class="muted">${ok ? `${d.tokens} tokens` : esc(d.status)}</span></label>`;
+  }).join("") : `<p class="muted" style="padding:12px">Bibliothèque vide : ajoutez un fichier ci-dessous.</p>`;
+}
+async function openDocs() { await loadLibrary(); renderPick(); $("#docs-dlg").showModal(); }
+async function uploadDocs(files) {
+  const fd = new FormData(); [...files].forEach((f) => fd.append("files", f));
+  try {
+    const res = await api.upload("/api/library", fd);
+    res.filter((r) => r.error).forEach((r) => toast(`${r.name} : ${r.error}`));
+    const ids = res.filter((r) => r.id).map((r) => r.id);
+    for (let n = 0; n < 60 && ids.length; n++) { // conversion en tâche de fond : on attend qu'elle finisse
+      await loadLibrary(); renderPick();
+      if (ids.every((id) => (S.library.find((d) => d.id === id) || {}).status !== "en cours")) break;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    ids.forEach((id) => { if ((S.library.find((d) => d.id === id) || {}).status === "prêt" && !S.docIds.includes(id)) S.docIds.push(id); });
+    renderPick(); renderChips();
+  } catch (e) { toast(e.message); }
+  $("#doc-upload").value = "";
+}
+
+/* ---------- Réglages Claude ---------- */
 function renderCost(last) {
   const cap = +$("#cap").value || 0;
-  if (last) {
-    $("#k-last").innerHTML = `${money(last.cost, 4)} <small>$</small>`;
-    $("#k-last-tok").textContent = `${last.tin} entrée · ${last.tout} sortie · ${last.model}`;
-  }
-  $("#k-month").innerHTML = `${money(month.cost)} <small>$</small>`;
-  $("#k-tok").textContent = month.tokens.toLocaleString("fr-FR");
-  const pct = cap ? Math.min(100, (month.cost / cap) * 100) : 0;
-  $("#k-bar").style.width = pct + "%";
-  $("#k-bar").style.background = pct > 90 ? "var(--err)" : pct > 70 ? "var(--warn)" : "";
+  if (last) { $("#k-last").innerHTML = `${money(last.cost, 4)} <small>$</small>`; $("#k-last-tok").textContent = `${last.tin} entrée · ${last.tout} sortie · ${last.model}`; }
+  $("#k-month").innerHTML = `${money(S.month.cost)} <small>$</small>`;
+  $("#k-tok").textContent = S.month.tokens.toLocaleString("fr-FR");
+  const pct = cap ? Math.min(100, (S.month.cost / cap) * 100) : 0;
+  $("#k-bar").style.width = pct + "%"; $("#k-bar").style.background = pct > 90 ? "var(--err)" : pct > 70 ? "var(--warn)" : "";
   $("#k-cap").textContent = cap ? `${Math.round(pct)} % du plafond de ${cap} $` : "Aucun plafond";
-}
-
-function renderThread() {
-  $("#chat").innerHTML = thread.length ? thread.map((m, i) =>
-    `<div class="msg ${m.role === "user" ? "user" : "bot"}" id="m${i}">${esc(m.text)}${m.meta ? `<span class="muted">${esc(m.meta)}</span>` : ""}</div>`).join("")
-    : `<p class="muted" style="margin:0">Aucun message. Collez un prompt ou venez de la page Utilisation.</p>`;
-  $("#chat").scrollTop = $("#chat").scrollHeight;
-}
-
-function estimate() {
-  const t = tokens($("#msg").value) + thread.reduce((n, m) => n + tokens(m.text), 0), p = price($("#model").value);
-  $("#est").textContent = $("#msg").value.trim() ? `≈ ${t} tokens d'entrée (tout le fil est renvoyé) · ≈ ${money((t * p.in) / 1e6, 4)} $ avant réponse` : "";
-}
-
-async function send() {
-  const text = $("#msg").value.trim(); if (!text) return;
-  const model = $("#model").value, cap = +$("#cap").value || 0;
-  if (cap && month.cost >= cap) return toast("Plafond mensuel atteint : envoi bloqué");
-  const messages = thread.filter((m) => m.text.trim() && !m.error).map((m) => ({ role: m.role === "user" ? "user" : "assistant", content: m.text }))
-    .concat([{ role: "user", content: text }]);
-  thread.push({ role: "user", text }); $("#msg").value = ""; estimate();
-  const bot = { role: "bot", text: "" }; thread.push(bot); renderThread();
-  $("#send").disabled = true;
-  const el = $("#m" + (thread.length - 1));
-  try {
-    await streamNdjson("/api/chat", { model, messages }, (m) => {
-      if (m.t) { bot.text += m.t; el.textContent = bot.text; $("#chat").scrollTop = 1e9; }
-      if (m.error) { bot.text += `\n[${m.error}]`; el.textContent = bot.text; }
-      if (m.done) {
-        bot.meta = m.fallback ? `Ollama (secours) · 0 $` : `${m.model} · ${m.tokens_in} + ${m.tokens_out} tokens · ${money(m.cost, 4)} $`;
-        if (m.fallback) bot.fallback = true;
-        month = { cost: m.month_cost, tokens: m.month_tokens };
-        renderCost({ cost: m.cost, tin: m.tokens_in, tout: m.tokens_out, model: m.model });
-      }
-    });
-  } catch (e) {
-    bot.text = bot.text || `[${e.message}]`; bot.error = !bot.text.trim() || bot.text.startsWith("[");
-    if (/Plafond/.test(e.message)) toast(e.message);
-  }
-  renderThread(); saveThread(); $("#send").disabled = false;
-}
-
-async function loadSettings() {
-  try {
-    const [s, u] = await Promise.all([api.get("/api/chat/settings"), api.get("/api/chat/usage")]);
-    applySettings(s); month = { cost: u.month_cost, tokens: u.month_tokens };
-  } catch (e) { toast("Réglages : " + e.message); }
-  renderCost();
+  $("#cost-pill").textContent = `${money(S.month.cost)} $${cap ? " / " + cap + " $" : ""} ce mois`;
 }
 function applySettings(s) {
+  S.settings = s;
   $("#key").value = "";
   $("#key").placeholder = s.has_key ? `Clé enregistrée (${s.key_hint}) : laissez vide pour la garder` : "sk-ant-…";
   $("#key-state").className = "status " + (s.has_key ? "ok" : "err");
   $("#key-state").textContent = s.has_key ? "enregistrée " + s.key_hint : "aucune clé (réponses par Ollama en secours)";
   $("#key-del").hidden = !s.has_key;
-  $("#cap").value = s.cap; $("#default-model").value = s.default_model; $("#model").value = s.default_model;
+  $("#cap").value = s.cap; $("#default-model").value = s.default_model;
   $("#p-h-in").value = s.prices.haiku.in; $("#p-h-out").value = s.prices.haiku.out;
   $("#p-s-in").value = s.prices.sonnet.in; $("#p-s-out").value = s.prices.sonnet.out;
   $("#model-ids").textContent = `${s.models.haiku}, ${s.models.sonnet}`;
 }
 async function saveSettings(deleteKey = false) {
   const body = {
-    api_key: $("#key").value.trim() || null, delete_key: deleteKey,
-    cap: +$("#cap").value || 0, default_model: $("#default-model").value,
+    api_key: $("#key").value.trim() || null, delete_key: deleteKey, cap: +$("#cap").value || 0, default_model: $("#default-model").value,
     prices: { haiku: { in: +$("#p-h-in").value, out: +$("#p-h-out").value }, sonnet: { in: +$("#p-s-in").value, out: +$("#p-s-out").value } },
   };
-  try { applySettings(await api.post("/api/chat/settings", body)); toast(deleteKey ? "Clé supprimée" : "Réglages enregistrés"); renderCost(); estimate(); }
-  catch (e) { toast(e.message); }
+  try {
+    applySettings(await api.post("/api/chat/settings", body)); toast(deleteKey ? "Clé supprimée" : "Réglages enregistrés"); renderCost();
+    S.models.has_key = S.settings.has_key; fillTargets($("#target").value);
+  } catch (e) { toast(e.message); }
 }
 
+/* ---------- Démarrage ---------- */
+function autosize() { const t = $("#msg"); t.style.height = "auto"; t.style.height = Math.min(260, t.scrollHeight) + "px"; estimate(); }
 document.addEventListener("DOMContentLoaded", async () => {
+  const q = new URLSearchParams(location.search);
+  try {
+    const [m, s, u] = await Promise.all([api.get("/api/ia/models"), api.get("/api/chat/settings"), api.get("/api/chat/usage")]);
+    S.models = m; applySettings(s); S.month = { cost: u.month_cost, tokens: u.month_tokens };
+  } catch (e) { toast(e.message); S.models = S.models || { agents: [], ollama: [], claude: ["haiku", "sonnet"], has_key: false }; }
+  renderCost();
+  if (S.models.ollama_error) toast("Ollama injoignable : seuls les modèles Claude répondront");
+  fillTargets(q.get("ia") ? "agent:" + q.get("ia") : null);
+  await Promise.all([loadConvs(), loadLibrary()]);
+  if (q.get("c")) await openConv(+q.get("c")); else renderThread();
   try { const p = sessionStorage.getItem("last-prompt"); if (p) { $("#msg").value = p; sessionStorage.removeItem("last-prompt"); } } catch (e) {}
-  await loadSettings();
-  renderThread();
-  $("#msg").addEventListener("input", estimate); $("#model").addEventListener("change", estimate);
-  $("#send").addEventListener("click", send);
-  $("#msg").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) send(); });
-  $("#clear").addEventListener("click", () => { thread = []; saveThread(); renderThread(); estimate(); });
+  autosize(); $("#msg").focus();
+
+  $("#target").addEventListener("change", onTarget);
+  $("#msg").addEventListener("input", autosize);
+  $("#msg").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); if (!S.busy) send(); } });
+  $("#send").addEventListener("click", () => send());
+  $("#structure").addEventListener("click", structure);
+  $("#new-conv").addEventListener("click", newConv);
+  $("#conv-filter").addEventListener("input", renderConvs);
+  $("#side-toggle").addEventListener("click", (e) => { e.stopPropagation(); $("#side").classList.toggle("open"); });
+  $(".pane").addEventListener("click", () => $("#side").classList.remove("open")); // mobile : toucher à côté ferme
+  $("#conv-list").addEventListener("click", async (e) => {
+    const item = e.target.closest(".conv-item"); if (!item) return;
+    const id = +item.dataset.id, act = e.target.dataset.act;
+    if (act === "del") {
+      if (!confirm("Supprimer cette conversation ?")) return;
+      await api.del("/api/ia/conversations/" + id); if (S.conv && S.conv.id === id) newConv(); return loadConvs();
+    }
+    if (act === "ren") {
+      const c = S.convs.find((x) => x.id === id), t = prompt("Nouveau titre", c.title);
+      if (t && t.trim()) { await api.patch("/api/ia/conversations/" + id, { title: t }); if (S.conv && S.conv.id === id) S.conv.title = t; loadConvs(); }
+      return;
+    }
+    if (!S.busy) openConv(id);
+  });
+  $("#thread").addEventListener("click", (e) => {
+    const act = e.target.dataset.act;
+    if (act === "copy") copy(S.conv.messages[+e.target.dataset.i].content);
+    if (act === "regen") send(true);
+  });
+  $("#attach").addEventListener("click", openDocs);
+  $("#docs-ok").addEventListener("click", () => {
+    S.docIds = [...document.querySelectorAll("#doc-pick input:checked")].map((x) => +x.value);
+    renderChips(); $("#docs-dlg").close();
+  });
+  $("#doc-upload").addEventListener("change", (e) => uploadDocs(e.target.files));
+  $("#chips").addEventListener("click", (e) => { if (e.target.dataset.id) { S.docIds = S.docIds.filter((x) => x !== +e.target.dataset.id); renderChips(); } });
+  $("#open-claude").addEventListener("click", (e) => { e.preventDefault(); renderCost(); $("#claude-dlg").showModal(); });
+  $("#claude-close").addEventListener("click", () => $("#claude-dlg").close());
+  $("#cost-pill").addEventListener("click", () => { renderCost(); $("#claude-dlg").showModal(); });
   $("#cap").addEventListener("input", () => renderCost());
   $("#save").addEventListener("click", () => saveSettings(false));
   $("#key-del").addEventListener("click", () => { if (confirm("Supprimer votre clé API du serveur ?")) saveSettings(true); });
-  estimate();
 });
 </script>
 </body>

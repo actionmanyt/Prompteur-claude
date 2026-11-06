@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mes IA · Prompteur Claude</title>
+<meta name="theme-color" content="#0b2420">
+<link rel="stylesheet" href="style.css">
+<script src="common.js"></script>
+</head>
+<body>
+<header>
+  <nav class="nav">
+    <div class="logo"><a href="index.html">Prompteur Claude</a><button onclick="toggleTheme()" title="Changer de thème">◐</button></div>
+    <ul id="menu">
+      <li><a href="index.html">Utilisation</a></li>
+      <li><a href="chat.html">Tchat</a></li>
+      <li><a href="ia.html">Mes IA</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main class="main" style="max-width:1200px">
+  <div class="page-header">
+    <h1>Mes IA</h1>
+    <p>Une IA = un modèle Ollama + un rôle (Contexte, Tâche, Contraintes, Format) + des documents de la bibliothèque.
+      À chaque question, les extraits les plus proches sont ajoutés au message. Le modèle lui-même n'est pas modifié.</p>
+  </div>
+
+  <div class="ia-layout">
+    <div class="card ia-list" style="padding:12px">
+      <button class="btn primary" id="new" style="width:100%; justify-content:center">＋ Nouvelle IA</button>
+      <div id="list" style="margin-top:10px"></div>
+    </div>
+
+    <div class="card" id="editor">
+      <div class="grid">
+        <div><label for="name" style="margin-top:0">Nom</label><input id="name" maxlength="60" placeholder="Expert réseau, Correcteur d'articles…"></div>
+        <div><label for="base" style="margin-top:0">Modèle de base (Ollama)</label><select id="base"></select></div>
+        <div><label for="temp" style="margin-top:0">Température : <b id="temp-v">0,4</b> <span class="muted">(bas = précis, haut = créatif)</span></label>
+          <input id="temp" type="range" min="0" max="1.5" step="0.1" value="0.4" style="padding:0"></div>
+      </div>
+
+      <h3 style="margin-top:20px">Rôle de l'IA</h3>
+      <p class="muted" style="margin:0">Décrivez l'IA en une phrase et laissez le Prompteur remplir les 4 sections, ou remplissez-les vous-même.</p>
+      <div class="row" style="margin-top:6px">
+        <input id="idea" placeholder="Ex. : une IA qui m'aide à écrire mes articles de blog homelab, ton honnête et chiffré" style="flex:1; min-width:240px">
+        <button class="btn" id="fill">✨ Remplir avec le Prompteur</button>
+      </div>
+      <div class="sections4">
+        <div><label for="s-context">Contexte</label><textarea id="s-context" placeholder="Qui je suis, ce dont l'IA doit se souvenir…"></textarea></div>
+        <div><label for="s-task">Tâche</label><textarea id="s-task" placeholder="Ce que l'IA fait à chaque message…"></textarea></div>
+        <div><label for="s-constraints">Contraintes</label><textarea id="s-constraints" placeholder="Règles à respecter, ce qu'elle ne doit jamais faire…"></textarea></div>
+        <div><label for="s-format">Format</label><textarea id="s-format" placeholder="Forme des réponses : liste, étapes, longueur…"></textarea></div>
+      </div>
+
+      <h3 style="margin-top:20px">Documents</h3>
+      <p class="muted" style="margin:0">Ajoutez des fichiers depuis la page <a href="index.html" style="text-decoration:underline">Utilisation</a> : ils apparaissent ici une fois convertis.</p>
+      <input id="doc-filter" type="search" placeholder="Filtrer les documents…" style="margin:8px 0">
+      <div class="doc-pick" id="docs"></div>
+      <p class="muted" id="index-state" style="margin:8px 0 0"></p>
+
+      <details style="margin-top:16px"><summary class="muted" style="cursor:pointer">Consigne envoyée au modèle (aperçu)</summary><pre class="prompt" id="preview"></pre></details>
+
+      <div class="row" style="margin-top:16px">
+        <button class="btn primary" id="save">Enregistrer</button>
+        <a class="btn" id="test" href="#" hidden>Tester dans le tchat →</a>
+        <button class="btn" id="reindex" hidden title="Recalculer les extraits et les vecteurs">↻ Réindexer</button>
+        <button class="btn" id="publish" hidden title="Créer un vrai modèle dans Ollama avec ce rôle (sans les documents)">Publier dans Ollama</button>
+        <span style="flex:1"></span>
+        <button class="btn" id="del" hidden>Supprimer</button>
+      </div>
+      <p class="muted" id="pub-state" style="margin:8px 0 0"></p>
+    </div>
+  </div>
+</main>
+
+<footer class="footer">© 2026 Prompteur Claude · Dev par Arthur Lejosne · style <a href="https://homelab.arthurlejosne.workers.dev/">Mon Homelab</a> · <a href="https://github.com/actionmanyt/Prompteur-claude">Code source (AGPL-3.0)</a></footer>
+
+<script>
+const F = ["context", "task", "constraints", "format"];
+const LABELS = { context: "Contexte", task: "Tâche", constraints: "Contraintes", format: "Format" };
+let agents = [], library = [], models = null, cur = null, poll = 0;
+
+function form() {
+  return {
+    name: $("#name").value, base_model: $("#base").value, temperature: +$("#temp").value,
+    ...Object.fromEntries(F.map((k) => [k, $("#s-" + k).value])),
+    doc_ids: [...document.querySelectorAll("#docs input:checked")].map((x) => +x.value),
+  };
+}
+function preview() {
+  const f = form(), parts = F.filter((k) => f[k].trim()).map((k) => `## ${LABELS[k]}\n${f[k].trim()}`);
+  if (f.doc_ids.length) parts.push("Des extraits de documents accompagnent la question. Appuie-toi d'abord sur eux, cite-les par leur numéro ([1], [2]…). S'ils ne contiennent pas la réponse, dis-le clairement au lieu d'inventer.");
+  $("#preview").textContent = parts.join("\n\n") || "(vide : le modèle répondra sans consigne)";
+  $("#temp-v").textContent = String(f.temperature).replace(".", ",");
+}
+
+function renderList() {
+  $("#list").innerHTML = agents.length ? agents.map((a) => `<div class="item ${cur && cur.id === a.id ? "active" : ""}" data-id="${a.id}">
+      <b>🧠 ${esc(a.name)}</b><span class="muted">${esc(a.base_model)} · ${a.doc_ids.length} doc.${a.ollama_model ? " · publiée" : ""}</span></div>`).join("")
+    : `<p class="muted" style="padding:4px 8px">Aucune IA pour l'instant.</p>`;
+}
+function renderBase(selected) {
+  const names = models.ollama.map((m) => m.name);
+  if (selected && !names.includes(selected)) names.unshift(selected);
+  $("#base").innerHTML = names.length ? names.map((n) => `<option>${esc(n)}</option>`).join("") : `<option value="">Ollama injoignable</option>`;
+  $("#base").value = selected || names.find((n) => n.startsWith("qwen3:4b")) || names[0] || "";
+}
+function renderDocs(checked) {
+  const f = $("#doc-filter").value.trim().toLowerCase();
+  const ready = library.filter((d) => d.status === "prêt");
+  $("#docs").innerHTML = ready.length ? ready.map((d) => `<label ${f && !d.name.toLowerCase().includes(f) ? "hidden" : ""}>
+      <input type="checkbox" value="${d.id}" ${checked.includes(d.id) ? "checked" : ""}><span style="flex:1">${esc(d.name)}</span>
+      <span class="muted">${d.tokens} tokens</span></label>`).join("")
+    : `<p class="muted" style="padding:12px">Bibliothèque vide.</p>`;
+}
+function renderIndex(a) {
+  clearTimeout(poll);
+  const el = $("#index-state");
+  if (!a || !a.doc_ids.length) { el.textContent = ""; return; }
+  const i = a.index;
+  if (i.errors.length) {
+    el.innerHTML = `<span class="status warn">Vecteurs indisponibles</span> : recherche par mots en attendant. ${esc(i.errors[0])}` +
+      (models.embed_ready ? "" : `<br>Installez le modèle (terminal SSH sur srv) : <code>docker exec -it ia-ollama-1 ollama pull ${esc(models.embed_model)}</code>`);
+  } else if (i.vectors < i.chunks || !i.chunks) {
+    el.innerHTML = `<span class="status warn">Indexation en cours</span> : ${i.vectors} / ${i.chunks} extraits vectorisés…`;
+    poll = setTimeout(async () => { if (cur && cur.id === a.id) { cur = await api.get("/api/ia/agents/" + a.id); renderIndex(cur); } }, 3000);
+  } else el.innerHTML = `<span class="status ok">Prêt</span> : ${i.chunks} extraits vectorisés avec ${esc(models.embed_model)}.`;
+}
+function edit(a) {
+  cur = a;
+  $("#name").value = a ? a.name : ""; $("#temp").value = a ? a.temperature : 0.4;
+  F.forEach((k) => ($("#s-" + k).value = a ? a[k] : ""));
+  renderBase(a && a.base_model); renderDocs(a ? a.doc_ids : []); renderIndex(a);
+  ["#test", "#reindex", "#publish", "#del"].forEach((s) => ($(s).hidden = !a));
+  if (a) $("#test").href = "chat.html?ia=" + a.id;
+  $("#pub-state").textContent = a && a.ollama_model
+    ? `Publiée dans Ollama sous « ${a.ollama_model} » le ${fmtDate(a.published)} (utilisable aussi dans Open WebUI, sans les documents). Republiez après une modification.`
+    : "";
+  renderList(); preview();
+}
+
+async function load(selectId) {
+  [agents, library] = await Promise.all([api.get("/api/ia/agents"), api.get("/api/library")]);
+  edit(agents.find((a) => a.id === selectId) || null);
+}
+async function save() {
+  const body = form();
+  try {
+    const a = cur ? await api.put("/api/ia/agents/" + cur.id, body) : await api.post("/api/ia/agents", body);
+    toast("IA enregistrée"); await load(a.id);
+  } catch (e) { toast(e.message); }
+}
+async function fill() {
+  const idea = $("#idea").value.trim(); if (!idea) return toast("Décrivez d'abord l'IA en une phrase");
+  const btn = $("#fill"); btn.disabled = true; btn.textContent = "✨ Rédaction…";
+  try {
+    let text = "";
+    await streamNdjson("/api/ia/structure", { text: "Rôle permanent d'une IA assistante (consigne système) : " + idea }, (m) => {
+      if (m.error) throw new Error(m.error);
+      if (m.done) text = m.prompt;
+    });
+    // Le Prompteur répond en sections ## Contexte / ## Tâche / ## Contraintes / ## Format
+    let n = 0;
+    for (const k of F) {
+      const r = new RegExp(`^##\\s*${LABELS[k]}\\s*\\n([\\s\\S]*?)(?=^##\\s|$(?![\\s\\S]))`, "m").exec(text);
+      if (r && r[1].trim()) { $("#s-" + k).value = r[1].trim(); n++; }
+    }
+    if (!n) $("#s-task").value = text;
+    if (!$("#name").value.trim()) $("#name").value = idea.slice(0, 40);
+    preview(); toast("Sections remplies : relisez-les puis enregistrez");
+  } catch (e) { toast(e.message); }
+  btn.disabled = false; btn.textContent = "✨ Remplir avec le Prompteur";
+}
+
+document.addEventListener("DOMContentLoaded", async () => {
+  try { models = await api.get("/api/ia/models"); } catch (e) { models = { ollama: [], embed_ready: false, embed_model: "bge-m3" }; }
+  if (models.ollama_error) toast("Ollama injoignable : " + models.ollama_error);
+  try { await load(+new URLSearchParams(location.search).get("id")); } catch (e) { toast(e.message); }
+  $("#new").addEventListener("click", () => edit(null));
+  $("#list").addEventListener("click", (e) => { const it = e.target.closest(".item"); if (it) edit(agents.find((a) => a.id === +it.dataset.id)); });
+  $("#save").addEventListener("click", save);
+  $("#fill").addEventListener("click", fill);
+  $("#editor").addEventListener("input", preview);
+  $("#editor").addEventListener("change", preview);
+  $("#doc-filter").addEventListener("input", () => renderDocs(form().doc_ids));
+  $("#reindex").addEventListener("click", async () => {
+    try { await api.post(`/api/ia/agents/${cur.id}/index`); cur = await api.get("/api/ia/agents/" + cur.id); renderIndex(cur); toast("Indexation relancée"); }
+    catch (e) { toast(e.message); }
+  });
+  $("#publish").addEventListener("click", async () => {
+    const b = $("#publish"); b.disabled = true; b.textContent = "Publication…";
+    try { const a = await api.post(`/api/ia/agents/${cur.id}/publish`); toast(`Modèle « ${a.ollama_model} » créé dans Ollama`); await load(a.id); }
+    catch (e) { toast(e.message); }
+    b.disabled = false; b.textContent = "Publier dans Ollama";
+  });
+  $("#del").addEventListener("click", async () => {
+    if (!confirm(`Supprimer l'IA « ${cur.name} » ?${cur.ollama_model ? " Son modèle Ollama sera aussi supprimé." : ""} Les documents restent dans la bibliothèque.`)) return;
+    try { await api.del("/api/ia/agents/" + cur.id); toast("IA supprimée"); await load(null); } catch (e) { toast(e.message); }
+  });
+});
+</script>
+</body>
+</html>

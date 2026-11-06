@@ -8,10 +8,23 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-from core import DOC_BUDGET, PROMPT_MODEL, db, ndjson, now_iso, ollama_stream, strip_fence, tokens
+from core import DOC_BUDGET, PROMPT_MODEL, OllamaError, db, ndjson, now_iso, ollama_stream, strip_fence, tokens
 from library import kept_text
 
 router = APIRouter(prefix="/api")
+ANSWER_MARGIN = 500  # tokens à laisser libres : réponse (num_predict 400 du Modelfile) et gabarit qwen3
+TOO_LONG = re.compile(r"request \((\d+) tokens\) exceeds the available context size \((\d+) tokens\)")
+
+
+def ollama_message(e: Exception) -> str:
+    """0.7.1 : message clair quand Ollama refuse, avec la part à retirer si le texte est trop long."""
+    m = TOO_LONG.search(str(e))
+    if m:
+        real, avail = int(m[1]), int(m[2])
+        cut = -(-100 * (real - (avail - ANSWER_MARGIN)) // real)  # arrondi au-dessus
+        return (f"Trop long pour le modèle : {real} tokens réels pour {avail} disponibles. "
+                f"Retirez environ {cut} % des sections (ou un document), puis relancez.")
+    return f"Ollama : {e}"
 
 
 class GenerateIn(BaseModel):
@@ -78,6 +91,9 @@ def generate(body: GenerateIn, request: Request):
             for chunk in ollama_stream(PROMPT_MODEL, [{"role": "user", "content": message}]):
                 parts.append(chunk)
                 yield ndjson({"t": chunk})
+        except OllamaError as e:  # Ollama a répondu, mais refuse : on affiche sa raison
+            yield ndjson({"error": ollama_message(e)})
+            return
         except Exception as e:
             yield ndjson({"error": f"Prompteur injoignable : {e}"})
             return

@@ -24,11 +24,18 @@ Coller un document entier dans Claude coûte cher en tokens, et un prompt mal or
 - Contextes enregistrés, réutilisables d'un prompt à l'autre.
 - Affichage du prompt au fur et à mesure de sa rédaction.
 
-**Tchat Claude (optionnel)**
+**Mes IA**
 
-- Envoi direct du prompt à Claude avec votre propre clé API, stockée chiffrée et jamais réaffichée.
-- Coût estimé par message, cumul mensuel et plafond de dépense.
-- Réponse de secours par l'IA locale si l'API ne répond pas.
+- Une IA = un modèle Ollama + un rôle en quatre parties (Contexte, Tâche, Contraintes, Format) + des documents de la bibliothèque.
+- Les quatre parties peuvent être rédigées par le Prompteur à partir d'une seule phrase.
+- À chaque question, les extraits de documents les plus proches sont ajoutés au message (vecteurs `bge-m3`, ou recherche par mots en secours), et la réponse cite ses sources.
+- Publication possible comme vrai modèle Ollama, utilisable aussi dans Open WebUI. Détails dans `docs/mes-ia.md`.
+
+**Tchat**
+
+- Conversations enregistrées par compte, au choix avec une de vos IA, un modèle Ollama ou Claude.
+- Documents joints, « Structurer » (mise au format Contexte / Tâche / Contraintes / Format), Arrêter, Régénérer, Copier.
+- Claude (optionnel) : votre propre clé API, stockée chiffrée et jamais réaffichée, coût par message, cumul mensuel et plafond de dépense, réponse de secours par l'IA locale si l'API ne répond pas.
 
 **Tableau de bord (administrateurs)**
 
@@ -41,7 +48,7 @@ Coller un document entier dans Claude coûte cher en tokens, et un prompt mal or
 ## Prérequis
 
 - [Docker](https://docs.docker.com/) et Docker Compose.
-- [Ollama](https://github.com/ollama/ollama) avec le modèle de base `qwen3:4b-instruct`.
+- [Ollama](https://github.com/ollama/ollama) avec le modèle de base `qwen3:4b-instruct`, et `bge-m3` pour la recherche dans les documents de Mes IA (`ollama pull bge-m3`, facultatif).
 - Recommandé : une carte graphique NVIDIA avec 6 Go de mémoire vidéo. Sans carte graphique, l'outil fonctionne, mais la rédaction est plus lente.
 
 ## Installation
@@ -102,8 +109,7 @@ Les tests unitaires et d'intégration n'appellent ni Ollama, ni l'API Claude, ni
 - Qualité des prompts : exemples de prompts idéaux dans le Modelfile.
 - OCR pour les images et les PDF scannés.
 - Prise en charge des anciens formats bureautiques et des formats libres (DOC, PPT, ODT, RTF).
-- Conservation des conversations du tchat.
-- Plus tard : affinage du modèle à partir des prompts idéaux.
+- Affinage (LoRA) de petits modèles à partir des documents et des prompts idéaux.
 
 Les idées et les retours sont les bienvenus dans les *issues*.
 

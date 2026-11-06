@@ -11,6 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 import accounts
 import admin
+import agents
 import auth
 import chat
 import ideals
@@ -27,7 +28,7 @@ app = FastAPI(title="Prompteur Claude", docs_url=None, redoc_url=None, openapi_u
 PUBLIC = {"/login.html", "/style.css", "/common.js", "/api/login", "/api/logout", "/favicon.ico"}
 # Avec un mot de passe provisoire, seules ces routes répondent tant qu'il n'est pas changé
 MUST_CHANGE_OK = {"/api/me", "/api/me/password", "/api/logout", "/api/site"}
-USER_PAGES = {"/", "/index.html", "/chat.html", "/ancien"}
+USER_PAGES = {"/", "/index.html", "/chat.html", "/ia.html", "/ancien"}
 
 
 @app.middleware("http")
@@ -66,7 +67,7 @@ def site_info():
 PUBLIC.add("/api/site")
 
 routers = [auth.router, library.router, prompts.router, chat.router]
-routers += [admin.router, accounts.router, ideals.router] if ADMIN_SITE else [legacy.router]
+routers += [admin.router, accounts.router, ideals.router] if ADMIN_SITE else [legacy.router, agents.router]
 for r in routers:
     app.include_router(r)
 

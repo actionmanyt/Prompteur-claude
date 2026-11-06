@@ -113,6 +113,10 @@ def _build_site(tmp_path, monkeypatch, mode):
     monkeypatch.setattr(mods.chat, "claude_stream", no_network)
     if hasattr(mods, "admin"):
         monkeypatch.setattr(mods.admin, "ollama_json", no_network)
+    if hasattr(mods, "agents"):
+        original["agents_ollama_json"] = mods.agents.ollama_json
+        monkeypatch.setattr(mods.agents, "ollama_stream", no_network)
+        monkeypatch.setattr(mods.agents, "ollama_json", no_network)
 
     clients = []
 

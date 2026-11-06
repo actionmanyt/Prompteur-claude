@@ -9,6 +9,7 @@ import re
 import secrets
 import sqlite3
 import time
+import urllib.error
 import urllib.request
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -20,9 +21,13 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://ia-ollama-1:11434").rstrip("/"
 PROMPT_MODEL = os.environ.get("PROMPT_MODEL", "prompteur-claude")
 FALLBACK_MODEL = os.environ.get("FALLBACK_MODEL", "qwen3:4b-instruct")
 NUM_CTX = int(os.environ.get("NUM_CTX", "8192"))
+OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "300"))  # secondes d'attente d'une réponse d'Ollama
 RESERVE = 1200  # place gardée pour l'idée, le contexte et la consigne du Modelfile
 DOC_BUDGET = NUM_CTX - RESERVE  # 6992 tokens de documents au maximum
-APP_VERSION = "0.7.0"
+APP_VERSION = "0.9.0"
+# Mes IA (0.9.0) : modèle de vecteurs pour chercher dans les documents, nombre d'extraits par question
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "bge-m3")  # multilingue, déjà installé sur srv
+RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "4"))
 # « user » : site du Prompteur (8093) · « admin » : tableau de bord, sur sa propre adresse (8094)
 APP_MODE = os.environ.get("APP_MODE", "user").strip().lower()
 SITE_URL = os.environ.get("SITE_URL", "http://md-converter:8000")  # site vu depuis le conteneur admin
@@ -61,6 +66,29 @@ CREATE TABLE IF NOT EXISTS chat_usage(
 CREATE TABLE IF NOT EXISTS user_settings(
   user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, api_key_enc TEXT,
   cap REAL DEFAULT 5, default_model TEXT DEFAULT 'haiku', prices TEXT);
+-- 0.9.0 : Mes IA (modèle Ollama + rôle en 4 sections + documents), extraits indexés, conversations
+CREATE TABLE IF NOT EXISTS agents(
+  id INTEGER PRIMARY KEY, owner_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  name TEXT NOT NULL, base_model TEXT NOT NULL, context TEXT DEFAULT '', task TEXT DEFAULT '',
+  constraints TEXT DEFAULT '', format TEXT DEFAULT '', temperature REAL DEFAULT 0.4,
+  ollama_model TEXT, published TEXT, created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS agent_documents(
+  agent_id INTEGER NOT NULL REFERENCES agents(id) ON DELETE CASCADE,
+  document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  PRIMARY KEY(agent_id, document_id));
+CREATE TABLE IF NOT EXISTS chunks(
+  id INTEGER PRIMARY KEY, document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+  idx INTEGER NOT NULL, doc_hash TEXT NOT NULL, title TEXT, text TEXT NOT NULL,
+  embed_model TEXT, vector BLOB);
+CREATE INDEX IF NOT EXISTS chunks_doc ON chunks(document_id);
+CREATE TABLE IF NOT EXISTS conversations(
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL, target TEXT NOT NULL, doc_ids TEXT DEFAULT '[]', created TEXT NOT NULL,
+  updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS messages(
+  id INTEGER PRIMARY KEY, conversation_id INTEGER NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+  role TEXT NOT NULL, content TEXT NOT NULL, meta TEXT DEFAULT '{}', date TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS messages_conv ON messages(conversation_id);
 """
 
 
@@ -69,8 +97,12 @@ def now_iso() -> str:
 
 
 def tokens(text: str) -> int:
-    """Estimation grossière : environ 4 caractères par token."""
-    return max(1, len(text or "") // 4) if text else 0
+    """Estimation prudente : 2,5 caractères par token, arrondi au-dessus.
+
+    0.7.1 : l'ancienne règle (4 caractères) sous-estimait qwen3 sur du français : un document
+    compté 5 795 tokens en faisait 9 935 pour Ollama.
+    """
+    return (len(text) * 2 + 4) // 5 if text else 0
 
 
 @contextmanager
@@ -149,26 +181,54 @@ def decrypt(token: str) -> str:
 
 
 # ---------- Ollama ----------
-def ollama_json(path: str, payload: dict | None = None, timeout: int = 5):
+def ollama_json(path: str, payload: dict | None = None, timeout: int = 5, method: str | None = None):
     data = json.dumps(payload).encode() if payload is not None else None
-    req = urllib.request.Request(OLLAMA_URL + path, data=data,
+    req = urllib.request.Request(OLLAMA_URL + path, data=data, method=method,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.load(r)
 
 
-def ollama_stream(model: str, messages: list, timeout: int = 300):
-    """Envoie une conversation à Ollama et renvoie le texte morceau par morceau."""
-    payload = json.dumps({"model": model, "messages": messages, "stream": True}).encode()
+class OllamaError(RuntimeError):
+    """Refus ou silence d'Ollama, avec la raison qu'il donne (affichée telle quelle sur la page)."""
+
+
+def _http_reason(e: urllib.error.HTTPError) -> str:
+    try:
+        raw = e.read().decode("utf-8", "replace").strip()
+    except Exception:
+        raw = ""
+    try:
+        return json.loads(raw).get("error") or raw
+    except (ValueError, AttributeError):
+        return raw or e.reason or ""
+
+
+def ollama_stream(model: str, messages: list, timeout: int | None = None, options: dict | None = None):
+    """Envoie une conversation à Ollama et renvoie le texte morceau par morceau.
+
+    Lève OllamaError avec la raison d'Ollama (HTTP 400 « context length »…) ou le délai dépassé.
+    """
+    timeout = timeout or OLLAMA_TIMEOUT
+    body = {"model": model, "messages": messages, "stream": True}
+    if options:
+        body["options"] = options
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(OLLAMA_URL + "/api/chat", data=payload,
                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    try:
+        r = urllib.request.urlopen(req, timeout=timeout)
+    except urllib.error.HTTPError as e:
+        raise OllamaError(f"demande refusée (HTTP {e.code}) : {_http_reason(e)}") from e
+    except TimeoutError as e:
+        raise OllamaError(f"pas de réponse après {timeout} s (réglage OLLAMA_TIMEOUT)") from e
+    with r:
         for line in r:
             if not line.strip():
                 continue
             j = json.loads(line)
             if j.get("error"):
-                raise RuntimeError(j["error"])
+                raise OllamaError(j["error"])
             chunk = (j.get("message") or {}).get("content", "")
             if chunk:
                 yield chunk
@@ -194,6 +254,23 @@ def migrate(con):
         except sqlite3.OperationalError as e:
             if "duplicate column" not in str(e):  # l'autre conteneur l'a ajoutée entre-temps
                 raise
+    recount_tokens(con)
+
+
+def recount_tokens(con):
+    """0.7.1 : recompte les documents avec la règle actuelle de tokens().
+    Seules les lignes dont le compte change sont réécrites (rien d'écrit aux démarrages suivants)."""
+    rows = con.execute("SELECT id, markdown, sections, tokens, tokens_full FROM documents "
+                       "WHERE status='prêt' AND markdown IS NOT NULL").fetchall()
+    for r in rows:
+        try:
+            secs = json.loads(r["sections"] or "[]")
+        except ValueError:
+            continue
+        kept = tokens("\n\n".join(s.get("text", "") for s in secs if s.get("on")))
+        full = tokens(r["markdown"])
+        if (kept, full) != (r["tokens"], r["tokens_full"]):
+            con.execute("UPDATE documents SET tokens=?, tokens_full=? WHERE id=?", (kept, full, r["id"]))
 
 
 def init_db():

@@ -1,6 +1,6 @@
 # Modifier et maintenir le Prompteur Claude
 
-*Version 0.8.0 (05/11/2026) : prompts idéaux écrits ou corrigés à la main dans le tableau de bord. 0.7.0 : comptes gérés depuis le tableau de bord, mot de passe provisoire.*
+*Version 0.9.0 (06/11/2026) : Mes IA et nouveau tchat (voir `mes-ia.md`), comptage des tokens à 2,5 caractères et raisons des refus d'Ollama affichées. Version 0.8.0 (05/11/2026) : prompts idéaux écrits ou corrigés à la main dans le tableau de bord. 0.7.0 : comptes gérés depuis le tableau de bord, mot de passe provisoire.*
 
 ## Où sont les choses
 
